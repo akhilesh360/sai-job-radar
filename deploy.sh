@@ -57,4 +57,4 @@ fi
 
 say "Done"
 echo "Open the URL printed by 'Deploying' above, click 'Scan all boards' once, and you're live."
-echo "Cron (every 15 min) is registered automatically — verify under Workers & Pages → sai-job-radar → Settings → Triggers."
+echo "Cron (every 5 min) is registered automatically — verify under Workers & Pages → sai-job-radar → Settings → Triggers."

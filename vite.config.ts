@@ -22,8 +22,8 @@ export default defineConfig(async ({ mode }) => {
     main: "./worker/index.ts",
     compatibility_date: "2025-09-01",
     compatibility_flags: ["nodejs_compat"],
-    // Every 15 minutes: validates pending boards and re-scans boards that are due (worker/index.ts).
-    triggers: { crons: ["*/15 * * * *"] },
+    // Every 5 minutes: validates pending boards and re-scans boards that are due (worker/index.ts, lib/scheduled.ts).
+    triggers: { crons: ["*/5 * * * *"] },
     d1_databases: d1
       ? [
           {

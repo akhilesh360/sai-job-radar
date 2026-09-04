@@ -150,8 +150,8 @@ export default function Home() {
       // even when the browser clock and the server clock disagree.
       let since: string | undefined;
       let remaining = Infinity;
-      // Start small: never-scanned boards sort first and can be large. postSlice grows the slice as requests succeed.
-      const scanSize = { current: 12, max: 25 };
+      // Full-size slices on the Workers Paid plan; postSlice still halves and retries if the host ever refuses one.
+      const scanSize = { current: 25, max: 25 };
       while (remaining > 0 && !stopRequested.current) {
         setNotice(`Step 2/2 · Reading job feeds… ${boardsScanned.toLocaleString()} / ${stats.active.toLocaleString()} boards, ${totalNew} new jobs so far`);
         const result = await postSlice<{ scanned: number; inserted: number; updated: number; remaining: number; since: string }>("/api/internal/ingest", scanSize, since ? { since } : {});

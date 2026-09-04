@@ -29,7 +29,7 @@ Google's index — and to track applications against it. It is optimised for one
    Browser ──HTTPS──►    │   Worker "job-radar"                                            │
    (dashboard)           │   ┌─────────────────────────┐    ┌───────────────────────┐    │
                          │   │ fetch()  – app + /api/* │    │ scheduled()  – cron   │    │
-                         │   │ (vinext / React 19)     │    │ every 15 min          │    │
+                         │   │ (vinext / React 19)     │    │ every 5 min           │    │
                          │   └───────────┬─────────────┘    └──────────┬────────────┘    │
                          │               │                             │                 │
                          │               ▼                             ▼                 │
@@ -69,7 +69,7 @@ Google's index — and to track applications against it. It is optimised for one
 
 ## 4. Data flow
 
-### 4.1 Scheduled cycle (every 15 minutes — `lib/scheduled.ts`)
+### 4.1 Scheduled cycle (every 5 minutes — `lib/scheduled.ts`)
 
 ```
 cron ──► runScheduledMaintenance()
@@ -167,7 +167,7 @@ Legacy tables from v2.0 (`brave_results`, `coverage_audit_*`) remain in the migr
 
 | Activity | Cadence | Volume / day | Cost |
 |---|---|---|---|
-| Cron invocation | every 15 min | 96 | $0 (Workers free: 100k req/day) |
+| Cron invocation | every 5 min | 288 | included (Workers Paid, $5/mo: 10M req + 30M CPU-ms/month) |
 | Board scans | up to 120 boards per cron run | ~4–10k feed fetches | $0 (sub-requests) |
 | D1 writes / reads | per scan | ~20–40k / ~10–30k | $0 (free: 100k writes, 5M reads) |
 | Google discovery | every 3 h (`DISCOVERY_INTERVAL_HOURS`) | 8 runs × 156 credits ≈ 1,250 credits | ≈ $1.25/day from prepaid Serper pack; 48k credits ≈ 38 days |

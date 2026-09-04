@@ -11,7 +11,7 @@ creates the tables, builds, deploys, and tells you how to add the Serper key. Re
 The manual steps below are the same thing spelled out.
 
 
-Everything runs on Cloudflare's free tier: Workers (the app + the 15-minute cron), D1 (the database),
+Everything runs on Cloudflare Workers Paid ($5/month — the free tier's 10 ms CPU limit kills scans): Workers (the app + the 5-minute cron), D1 (the database),
 and Workers secrets (your Serper key). One-time setup is about 20 minutes; after that a redeploy is
 `npm run build && npx wrangler deploy --config <generated config>`.
 
@@ -84,7 +84,7 @@ Redeploy is not needed after adding variables.
 Open the URL and click **Scan all boards** once. It stages the ~9,200-company catalog, checks which
 boards are alive, and scans every live one (10–15 minutes, progress shown). After that:
 
-- every 15 minutes the cron re-scans boards that are due (footer shows "Auto-scan last ran …");
+- every 5 minutes the cron re-reads 250 due boards, so every productive board is refreshed within 15 minutes (footer shows "Auto-scan last ran …");
 - every 3 hours it runs the Google discovery pass (footer shows credits used);
 - the page reloads itself every 5 minutes.
 

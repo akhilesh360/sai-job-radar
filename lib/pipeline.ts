@@ -107,7 +107,8 @@ async function upsertBoardJobs(db: Db, source: SourceRow, found: CanonicalJob[],
  */
 export async function scanBoards(options: { limit?: number; since?: string; concurrency?: number; mode?: "full" | "scheduled" } = {}) {
   const db = getDb();
-  const limit = Math.min(120, Math.max(1, options.limit ?? 25));
+  // 400 boards ≈ 3 subrequests each (fetch + D1), comfortably under the 1,000-subrequest ceiling per invocation.
+  const limit = Math.min(400, Math.max(1, options.limit ?? 25));
   const since = options.since ?? now();
   const scanStartedAt = now();
   await ensureDefaultSources(db);
@@ -115,7 +116,7 @@ export async function scanBoards(options: { limit?: number; since?: string; conc
   // Scheduled mode keeps the feed fresh cheaply: boards that have produced matching jobs are re-scanned
   // every couple of hours, boards that never matched anything only once a day.
   const due = options.mode === "scheduled"
-    ? or(isNull(sourceBoards.lastScannedAt), and(productive, lt(sourceBoards.lastScannedAt, since)), lt(sourceBoards.lastScannedAt, new Date(new Date(since).getTime() - 22 * 60 * 60 * 1000).toISOString()))
+    ? or(isNull(sourceBoards.lastScannedAt), and(productive, lt(sourceBoards.lastScannedAt, since)), lt(sourceBoards.lastScannedAt, new Date(new Date(since).getTime() - 24 * 60 * 60 * 1000).toISOString()))
     : or(isNull(sourceBoards.lastScannedAt), lt(sourceBoards.lastScannedAt, since));
   const filter = and(eq(sourceBoards.active, true), inArray(sourceBoards.ats, enabledAts), due);
   const boards = await db.select().from(sourceBoards).where(filter).orderBy(desc(productive), asc(sourceBoards.lastScannedAt), asc(sourceBoards.id)).limit(limit);
