@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDb } from "../db";
 import { ingestionRuns, jobs, sourceBoards, systemState } from "../db/schema";
@@ -111,15 +111,20 @@ async function upsertBoardJobs(db: Db, source: SourceRow, found: CanonicalJob[],
  * Scan the active boards that have not been scanned since `since` (oldest first).
  * Call repeatedly with the same `since` until `remaining` is 0 to cover every board.
  */
-export async function scanBoards(options: { limit?: number; since?: string; concurrency?: number } = {}) {
+export async function scanBoards(options: { limit?: number; since?: string; concurrency?: number; mode?: "full" | "scheduled" } = {}) {
   const db = getDb();
-  const limit = Math.min(60, Math.max(1, options.limit ?? 25));
+  const limit = Math.min(120, Math.max(1, options.limit ?? 25));
   const since = options.since ?? now();
   const scanStartedAt = now();
   await ensureDefaultSources(db);
-  const notScannedSince = or(isNull(sourceBoards.lastScannedAt), lt(sourceBoards.lastScannedAt, since));
-  const filter = and(eq(sourceBoards.active, true), inArray(sourceBoards.ats, enabledAts), notScannedSince);
-  const boards = await db.select().from(sourceBoards).where(filter).orderBy(asc(sourceBoards.lastScannedAt), asc(sourceBoards.id)).limit(limit);
+  const productive = gt(sourceBoards.lastJobCount, 0);
+  // Scheduled mode keeps the feed fresh cheaply: boards that have produced matching jobs are re-scanned
+  // every couple of hours, boards that never matched anything only once a day.
+  const due = options.mode === "scheduled"
+    ? or(isNull(sourceBoards.lastScannedAt), and(productive, lt(sourceBoards.lastScannedAt, since)), lt(sourceBoards.lastScannedAt, new Date(new Date(since).getTime() - 22 * 60 * 60 * 1000).toISOString()))
+    : or(isNull(sourceBoards.lastScannedAt), lt(sourceBoards.lastScannedAt, since));
+  const filter = and(eq(sourceBoards.active, true), inArray(sourceBoards.ats, enabledAts), due);
+  const boards = await db.select().from(sourceBoards).where(filter).orderBy(desc(productive), asc(sourceBoards.lastScannedAt), asc(sourceBoards.id)).limit(limit);
   const [run] = await db.insert(ingestionRuns).values({ status: "running" }).returning();
   let fetched = 0, inserted = 0, updated = 0, failed = 0;
   const failures: Statement[] = [];
@@ -144,14 +149,16 @@ export async function scanBoards(options: { limit?: number; since?: string; conc
   return { runId: run.id, status, scanned: boards.length, fetched, inserted, updated, failed, remaining, since };
 }
 
-/** What the scheduled Worker cron runs: a slice of validation plus a slice of the stalest boards. */
+/**
+ * What the Worker cron runs every 15 minutes: a small slice of validation plus up to 100 boards that are
+ * due (productive boards after 2 hours, quiet boards after 24 hours), so new postings show up within hours.
+ */
 export async function runScheduledMaintenance() {
   const db = getDb();
   await ensureDefaultSources(db);
-  const validation = await validatePendingSources(20);
-  // Re-scan boards that were last scanned more than 6 hours ago, stalest first.
-  const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
-  const scan = await scanBoards({ limit: 40, since });
+  const validation = await validatePendingSources(15);
+  const since = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  const scan = await scanBoards({ limit: 100, since, mode: "scheduled", concurrency: 8 });
   await setState(db, "last_scheduled_run_at", now());
   return { validation, scan };
 }

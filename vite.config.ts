@@ -14,8 +14,8 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const localBindingConfig = {
   main: "./worker/index.ts",
   compatibility_flags: ["nodejs_compat"],
-  // Hourly cron: validates pending boards and re-scans the stalest active boards (worker/index.ts).
-  triggers: { crons: ["0 * * * *"] },
+  // Every 15 minutes: validates pending boards and re-scans boards that are due (worker/index.ts).
+  triggers: { crons: ["*/15 * * * *"] },
   d1_databases: d1
     ? [
         {

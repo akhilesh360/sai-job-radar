@@ -4,9 +4,9 @@
 
 - Fixed the US location filter, which rejected "Remote U.S.", "Remote (US)", "San Francisco", "New York" and most city-only locations.
 - Broadened role matching to cover data platform / ML infra / research engineer / analyst titles; excludes managers, interns, sales, and data-center roles.
-- Use Greenhouse `first_published` (not `updated_at`) as the posted date; default the feed to the last 30 days instead of 7.
+- Use Greenhouse `first_published` (not `updated_at`) as the posted date; the feed shows only the last 7 days (filters: 6h / 24h / 3d / 7d).
 - "Scan all boards" now covers every active board in one click (looping 25 boards per request) instead of 40 boards per click.
-- Added a Worker `scheduled()` handler and hourly cron so the feed refreshes without clicking.
+- Added a Worker `scheduled()` handler on a 15-minute cron (productive boards every ~2h, quiet boards daily) and a 5-minute dashboard auto-reload, so new postings appear within hours without clicking.
 - Jobs that disappear from a board get a `Closed` status automatically (and reopen as New if they come back); placeholder seed jobs are removed.
 - Batched D1 writes so a scan stays inside Worker request limits.
 - Removed the Brave/Google discovery experiment, coverage audit, ChatGPT auth helper, and HTML-scraping connectors.

@@ -15,7 +15,7 @@ type SourceStats = {
 
 const statuses: Status[] = ["New", "Saved", "Applied", "Interview", "Rejected", "Archived", "Closed"];
 const closedStatuses: Status[] = ["Archived", "Rejected", "Closed"];
-const recencyHours: Record<string, number> = { "24 hours": 24, "3 days": 72, "7 days": 168, "14 days": 336, "30 days": 720 };
+const recencyHours: Record<string, number> = { "6 hours": 6, "24 hours": 24, "3 days": 72, "7 days": 168 };
 
 function relativeTime(iso: string) {
   const diff = Math.max(0, Date.now() - new Date(iso).getTime());
@@ -52,10 +52,11 @@ export default function Home() {
   const [scanning, setScanning] = useState(false);
   const [notice, setNotice] = useState("");
   const stopRequested = useRef(false);
+  const scanningRef = useRef(false);
 
   const [query, setQuery] = useState("");
   const [role, setRole] = useState("All roles");
-  const [recency, setRecency] = useState("30 days");
+  const [recency, setRecency] = useState("7 days");
   const [source, setSource] = useState("All sources");
   const [workplace, setWorkplace] = useState("All locations");
   const [statusFilter, setStatusFilter] = useState("Open");
@@ -75,7 +76,12 @@ export default function Home() {
     if (response.ok) setSourceStats(await response.json() as SourceStats);
   };
 
-  useEffect(() => { void Promise.all([loadJobs(), loadSourceStats()]); }, []);
+  // Load on open, then refresh every 5 minutes so jobs found by the background scans appear without a reload.
+  useEffect(() => {
+    void Promise.all([loadJobs(), loadSourceStats()]);
+    const timer = setInterval(() => { if (!scanningRef.current) void Promise.all([loadJobs(), loadSourceStats()]); }, 5 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   /**
    * One click does the whole pipeline: stage the catalog, validate pending boards, then scan every active
@@ -83,6 +89,7 @@ export default function Home() {
    */
   const runFullScan = async () => {
     setScanning(true);
+    scanningRef.current = true;
     stopRequested.current = false;
     let totalNew = 0, totalRefreshed = 0, boardsScanned = 0;
     try {
@@ -121,6 +128,7 @@ export default function Home() {
       setNotice(`Scan stopped early (${error instanceof Error ? error.message : "unknown error"}). ${totalNew} new jobs were saved; click Scan again to continue where it left off.`);
     } finally {
       await Promise.all([loadJobs(), loadSourceStats()]);
+      scanningRef.current = false;
       setScanning(false);
     }
   };
@@ -150,7 +158,7 @@ export default function Home() {
         && (role === "All roles" || classifyRole(job.title) === role)
         && (source === "All sources" || job.source === source)
         && (workplace === "All locations" || job.workplace === workplace)
-        && (recency === "All time" || ageHours <= recencyHours[recency]);
+        && ageHours <= recencyHours[recency];
     }).sort((a, b) => {
       const av = new Date(a.postedAt ?? a.discoveredAt).getTime(), bv = new Date(b.postedAt ?? b.discoveredAt).getTime();
       return sort === "Newest first" ? bv - av : av - bv;
@@ -159,7 +167,7 @@ export default function Home() {
 
   const openJobs = jobs.filter(job => !closedStatuses.includes(job.status));
   const newCount = openJobs.filter(job => job.status === "New").length;
-  const weekCount = openJobs.filter(job => now - new Date(job.postedAt ?? job.discoveredAt).getTime() < 7 * 86400000).length;
+  const todayCount = openJobs.filter(job => now - new Date(job.postedAt ?? job.discoveredAt).getTime() < 86400000).length;
   const appliedCount = jobs.filter(job => job.status === "Applied").length;
   const interviewCount = jobs.filter(job => job.status === "Interview").length;
   const sources = [...new Set(jobs.map(job => job.source))].sort();
@@ -179,7 +187,7 @@ export default function Home() {
 
     <section className="workspace">
       <div className="page-heading">
-        <div><p className="eyebrow">30-DAY JOB SEARCH</p><h1>Your job command center</h1><p>Live openings pulled straight from company ATS boards, filtered to US data / AI / engineering roles.</p></div>
+        <div><p className="eyebrow">30-DAY JOB SEARCH</p><h1>Your job command center</h1><p>Openings from the last 7 days, pulled straight from company ATS boards the moment they are posted.</p></div>
         <div className="sync-copy"><span>Last refreshed</span><strong>{lastRefresh ? lastRefresh.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Loading…"}</strong><small>{sourceStats ? `${sourceStats.active.toLocaleString()} live boards` : ""}</small></div>
       </div>
 
@@ -187,7 +195,7 @@ export default function Home() {
 
       <div className="stats-grid">
         <article><span>NEW JOBS</span><strong>{newCount}</strong><small>Waiting for your review</small></article>
-        <article><span>POSTED THIS WEEK</span><strong>{weekCount}</strong><small>Apply to these first</small></article>
+        <article><span>POSTED TODAY</span><strong>{todayCount}</strong><small>Apply to these first</small></article>
         <article><span>APPLICATIONS</span><strong>{appliedCount}</strong><small>Statuses saved automatically</small></article>
         <article><span>INTERVIEWS</span><strong>{interviewCount}</strong><small>Keep the pipeline moving</small></article>
       </div>
@@ -200,7 +208,7 @@ export default function Home() {
         <div className="filters">
           <label className="search-box"><Icon name="search" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search title, company, or location" aria-label="Search jobs" /></label>
           <select value={role} onChange={event => setRole(event.target.value)} aria-label="Filter by role"><option>All roles</option>{roleFamilies.map(item => <option key={item}>{item}</option>)}</select>
-          <select value={recency} onChange={event => setRecency(event.target.value)} aria-label="Filter by age"><option>24 hours</option><option>3 days</option><option>7 days</option><option>14 days</option><option>30 days</option><option>All time</option></select>
+          <select value={recency} onChange={event => setRecency(event.target.value)} aria-label="Filter by age"><option>6 hours</option><option>24 hours</option><option>3 days</option><option>7 days</option></select>
           <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)} aria-label="Filter by status"><option>Open</option><option>All statuses</option>{statuses.map(item => <option key={item}>{item}</option>)}</select>
           <select value={source} onChange={event => setSource(event.target.value)} aria-label="Filter by source"><option>All sources</option>{sources.map(item => <option key={item}>{item}</option>)}</select>
           <select value={workplace} onChange={event => setWorkplace(event.target.value)} aria-label="Filter by workplace"><option>All locations</option><option>Remote</option><option>Hybrid</option><option>Onsite</option></select>
@@ -226,7 +234,7 @@ export default function Home() {
           {filtered.length === 0 && <div className="empty-state"><Icon name="search" /><h3>{jobs.length === 0 ? "No jobs yet" : "No jobs match these filters"}</h3><p>{jobs.length === 0 ? "Click “Scan all boards” to pull live openings from every company board." : "Clear a filter or pick a longer time range."}</p></div>}
         </div>
       </section>
-      <footer className="footer-note"><span><i className="healthy" /> US roles only • Jobs that leave a board are marked Closed automatically</span><span>{sourceStats?.lastScheduledRunAt ? `Hourly auto-scan last ran ${relativeTime(sourceStats.lastScheduledRunAt)}` : "Hourly auto-scan has not run yet"}</span></footer>
+      <footer className="footer-note"><span><i className="healthy" /> US roles only • Jobs that leave a board are marked Closed automatically</span><span>{sourceStats?.lastScheduledRunAt ? `Auto-scan last ran ${relativeTime(sourceStats.lastScheduledRunAt)}` : "Auto-scan (every 15 min) has not run yet"}</span></footer>
     </section>
   </main>;
 }
