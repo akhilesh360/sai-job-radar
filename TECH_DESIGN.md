@@ -1,6 +1,6 @@
-# Sai Job Radar — Technical Design & Architecture
+# Job Radar — Technical Design & Architecture
 
-**Version:** 2.1 · **Status:** Live at `https://sai-job-radar.saiakhilesh-eng.workers.dev` · **Author:** Sai Akhilesh Veldi · **Date:** September 2026
+**Version:** 2.1 · **Status:** Live on Cloudflare Workers (`https://<worker-name>.<account>.workers.dev`) · **Date:** September 2026
 
 ---
 
@@ -26,7 +26,7 @@ Google's index — and to track applications against it. It is optimised for one
                          ┌───────────────────────────────────────────────────────────────┐
                          │                    CLOUDFLARE (free tier)                     │
                          │                                                               │
-   Browser ──HTTPS──►    │   Worker "sai-job-radar"                                      │
+   Browser ──HTTPS──►    │   Worker "job-radar"                                            │
    (dashboard)           │   ┌─────────────────────────┐    ┌───────────────────────┐    │
                          │   │ fetch()  – app + /api/* │    │ scheduled()  – cron   │    │
                          │   │ (vinext / React 19)     │    │ every 15 min          │    │
@@ -41,7 +41,7 @@ Google's index — and to track applications against it. It is optimised for one
                          │                ▼                       │                      │
                          │        ┌──────────────┐                │                      │
                          │        │  D1 (SQLite) │                │   Secrets:           │
-                         │        │  sai-job-radar│                │   SERPER_API_KEY     │
+                         │        │  job-radar    │                │   SERPER_API_KEY     │
                          │        └──────────────┘                │                      │
                          └──────────────────────────────────────── │ ─────────────────────┘
                                                                    ▼
