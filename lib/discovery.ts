@@ -36,7 +36,8 @@ const atsHosts: Array<{ ats: string; hosts: string[]; supported: boolean }> = [
   { ats: "Jobvite", hosts: ["jobs.jobvite.com"], supported: false },
   { ats: "JazzHR", hosts: ["applytojob.com"], supported: false },
   { ats: "Teamtailor", hosts: ["jobs.teamtailor.com"], supported: false },
-  { ats: "BambooHR", hosts: ["bamboohr.com"], supported: false },
+  { ats: "BambooHR", hosts: ["bamboohr.com"], supported: true },
+  { ats: "JobScore", hosts: ["careers.jobscore.com"], supported: true },
 ];
 
 // Six keyword groups built from the target-title list (Google caps OR-queries at ~32 terms each).
@@ -75,11 +76,14 @@ export function parseSourceUrl(rawUrl: string, origin = "google-discovery"): Par
     if (!match) return null;
     let slug = parts[0] ?? "";
     if (["Recruitee", "Breezy", "Pinpoint", "Teamtailor", "BambooHR", "iCIMS"].includes(match.ats)) slug = host.split(".")[0];
+    // JobScore URLs are careers.jobscore.com/careers/<company>/... or /jobs/<company>/feed.json.
+    if (match.ats === "JobScore") slug = ["careers", "jobs"].includes((parts[0] ?? "").toLowerCase()) ? parts[1] ?? "" : "";
     if (!slug || ["embed", "jobs", "job", "careers", "apply", "j", "o", "p", "www"].includes(slug.toLowerCase())) return null;
     slug = decodeURIComponent(slug).trim().replace(/[?#].*$/, "");
     if (!/^[a-z0-9][a-z0-9._ -]{0,80}$/i.test(slug)) return null;
     const id = `${match.ats}:${slug}`.toLowerCase();
-    const boardUrl = parts[0] === slug ? `https://${host}/${encodeURIComponent(slug)}` : `https://${host}`;
+    const boardUrl = match.ats === "JobScore" ? `https://${host}/careers/${encodeURIComponent(slug)}`
+      : parts[0] === slug ? `https://${host}/${encodeURIComponent(slug)}` : `https://${host}`;
     const companyName = slug.replace(/[-_.]+/g, " ").replace(/\b\w/g, char => char.toUpperCase());
     return { id, ats: match.ats, slug, companyName, boardUrl, origin, supported: match.supported };
   } catch {

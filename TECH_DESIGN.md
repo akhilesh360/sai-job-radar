@@ -138,7 +138,7 @@ Legacy tables from v2.0 (`brave_results`, `coverage_audit_*`) remain in the migr
 |---|---|
 | `lib/roles.ts` | Role families and a token-based title matcher (`data … engineer`, `ETL/Spark/Snowflake … developer`, `ML/LLM/RAG … engineer`, `GTM/growth … engineer`, `solutions/customer engineer, data/AI`, …). Excludes managers, directors, interns, sales reps, data-center, clinical, data-entry titles. Verified against a 205-title target list (205/205). |
 | `lib/locations.ts` | US detection: explicit US tokens → foreign signals → state names → state codes → ~150 US cities → bare "Remote". Multi-location strings ("SF; London") pass if any segment is US. |
-| `lib/ats-connectors.ts` | One `fetchBoardJobs()` with a branch per ATS (Ashby, Greenhouse, Lever, SmartRecruiters, Workable, Recruitee, Breezy, Pinpoint, Rippling). Public JSON only; 12 s timeout; Greenhouse uses `first_published`. |
+| `lib/ats-connectors.ts` | One `fetchBoardJobs()` with a branch per ATS (Ashby, Greenhouse, Lever, SmartRecruiters, Workable, Recruitee, Breezy, Pinpoint, Rippling, BambooHR and JobScore). Public JSON only; 12 s timeout; Greenhouse uses `first_published`. |
 | `lib/pipeline.ts` | `validatePendingSources`, `scanBoards`, batched D1 writes, close/reopen logic. |
 | `lib/discovery.ts` | Serper queries (16 domains × 6 phrase groups ≤ 32 words each, `tbs=qdr:d`), URL → board parsing, new-board staging, board bumping, unverified-job insertion, credit accounting, retry with backoff on 429/5xx (3 concurrent). |
 | `lib/scheduled.ts` | The cron orchestration (discover → validate → scan). |

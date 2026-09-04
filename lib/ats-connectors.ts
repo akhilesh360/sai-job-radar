@@ -11,7 +11,7 @@ export type CanonicalJob = {
 type Raw = Record<string, unknown>;
 
 // Every connector below is a public JSON endpoint, no credentials and no HTML scraping.
-export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling"];
+export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling", "BambooHR", "JobScore"];
 
 export function boardKeyPrefix(source: SourceBoard) {
   return `${source.ats}:${source.slug}:`.toLowerCase().replace(/[^a-z0-9:]+/g, "-");
@@ -154,6 +154,33 @@ export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[
       if (!keep(title, location)) return [];
       const id = str(raw.id) || str(raw.uuid) || title;
       return [canonical(source, id, title, location, str(raw.url) || str(raw.jobUrl) || `https://ats.rippling.com/${source.slug}/jobs/${id}`, raw.createdAt ?? raw.publishedAt)];
+    });
+  }
+
+  if (source.ats === "BambooHR") {
+    // Public list used by the hosted careers page. Non-customers answer with the marketing site (HTML), which fails JSON parsing → invalid board.
+    const data = await json<{ result?: Raw[] }>(`https://${slug}.bamboohr.com/careers/list`);
+    return (data.result ?? []).flatMap(raw => {
+      const title = str(raw.jobOpeningName) || str(raw.title), loc = raw.location as Raw | undefined, ats = raw.atsLocation as Raw | undefined;
+      const country = str(ats?.country);
+      const location = joinParts(loc?.city ?? ats?.city, loc?.state ?? ats?.state ?? ats?.province, /^(US|USA|United States)$/i.test(country) ? "United States" : country)
+        || (raw.isRemote ? "Remote" : "");
+      if (!keep(title, location)) return [];
+      const id = str(raw.id) || title;
+      // The list carries no posting date; the feed falls back to when the radar first saw the job.
+      return [canonical(source, id, title, location, `https://${source.slug}.bamboohr.com/careers/${id}`, raw.datePosted ?? null)];
+    });
+  }
+
+  if (source.ats === "JobScore") {
+    const data = await json<{ company_name?: string; jobs?: Raw[] }>(`https://careers.jobscore.com/jobs/${slug}/feed.json`);
+    const board = { ...source, companyName: str(data.company_name) || source.companyName };
+    return (data.jobs ?? []).flatMap(raw => {
+      const title = str(raw.title);
+      const location = joinParts(raw.city, raw.state, raw.country === "US" ? "United States" : raw.country) || str(raw.location);
+      if (!keep(title, location)) return [];
+      const id = str(raw.id) || title;
+      return [canonical(board, id, title, location, str(raw.detail_url).replace(/\?ref=rss.*$/, "") || `https://careers.jobscore.com/careers/${source.slug}/jobs/${id}`, raw.opened_date ?? raw.last_updated_date)];
     });
   }
 
