@@ -8,7 +8,7 @@ import { classifyRole } from "./roles";
 import { getState, setState } from "./state";
 
 /**
- * Top-down discovery through Google (Serper). Every few hours we ask Google for job pages posted in
+ * Top-down discovery through Google (Serper). Every 3 hours (DISCOVERY_INTERVAL_HOURS) we ask Google for job pages posted in
  * the past day on every major ATS domain, then:
  *   1. Any company board we have never seen is added to the catalog, validated, and scanned right away.
  *   2. Any known board that Google shows a fresh job for is bumped to the front of the scan queue.
@@ -38,11 +38,14 @@ const atsHosts: Array<{ ats: string; hosts: string[]; supported: boolean }> = [
   { ats: "BambooHR", hosts: ["bamboohr.com"], supported: false },
 ];
 
+// Six keyword groups built from the target-title list (Google caps OR-queries at ~32 terms each).
 export const discoveryPhraseGroups = [
-  ["Data Engineer", "Data Platform Engineer", "Analytics Engineer", "ETL Engineer"],
-  ["Data Scientist", "Data Analyst", "Business Intelligence Engineer", "BI Engineer"],
-  ["Machine Learning Engineer", "ML Engineer", "AI Engineer", "Applied AI Engineer", "LLM Engineer"],
-  ["Forward Deployed Engineer", "GTM Engineer", "Cloud Engineer", "AWS Engineer", "Product Engineer"],
+  ["Data Engineer", "Data Platform Engineer", "Data Infrastructure Engineer", "Data Pipeline Engineer", "Data Integration Engineer", "DataOps Engineer", "Big Data Engineer", "Data Reliability Engineer", "Data Quality Engineer", "Data Governance Engineer", "Data Warehouse Engineer"],
+  ["ETL Engineer", "ELT Engineer", "ETL Developer", "Databricks Engineer", "Snowflake Engineer", "Spark Developer", "PySpark Developer", "NiFi Engineer", "Streaming Data Engineer", "Azure Data Engineer", "AWS Data Engineer", "Cloud Data Engineer", "Dataiku", "Palantir Foundry"],
+  ["Analytics Engineer", "Business Intelligence Engineer", "BI Engineer", "BI Developer", "Power BI Developer", "Analytics Developer", "Data Visualization Engineer", "Data Scientist", "Decision Scientist", "Data Analyst"],
+  ["Machine Learning Engineer", "ML Engineer", "MLOps Engineer", "AI Engineer", "Applied AI Engineer", "Generative AI Engineer", "GenAI Engineer", "LLM Engineer", "RAG Engineer", "AI Platform Engineer", "Agentic AI Engineer", "NLP Engineer"],
+  ["GTM Engineer", "Go To Market Engineer", "Growth Engineer", "Revenue Operations Engineer", "Forward Deployed", "Product Engineer", "Cloud Engineer", "AWS Engineer", "GCP Engineer", "Cloud Platform Engineer", "Cloud Infrastructure Engineer"],
+  ["Software Engineer, Data", "Software Engineer, Data Platform", "Backend Engineer, Data", "Software Engineer, AI", "AI Software Engineer", "Software Engineer, Machine Learning", "Solutions Engineer, Data", "Solutions Engineer, AI", "Customer Engineer, Data", "ML Platform Engineer"],
 ];
 
 // Supported domains get 100 results per query (2 credits); unsupported ones 10 results (1 credit).
@@ -105,7 +108,7 @@ function guessLocation(text: string) {
 }
 
 export function discoveryConfigured() { return Boolean(bindings().SERPER_API_KEY); }
-export function discoveryIntervalHours() { return Math.max(1, Number(bindings().DISCOVERY_INTERVAL_HOURS ?? 2) || 2); }
+export function discoveryIntervalHours() { return Math.max(1, Number(bindings().DISCOVERY_INTERVAL_HOURS ?? 3) || 3); }
 
 export async function discoverNewBoards() {
   const key = bindings().SERPER_API_KEY;

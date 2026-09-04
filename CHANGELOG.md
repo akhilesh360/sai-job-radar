@@ -9,7 +9,8 @@
 - Added a Worker `scheduled()` handler on a 15-minute cron (productive boards every ~2h, quiet boards daily) and a 5-minute dashboard auto-reload, so new postings appear within hours without clicking.
 - Jobs that disappear from a board get a `Closed` status automatically (and reopen as New if they come back); placeholder seed jobs are removed.
 - Batched D1 writes so a scan stays inside Worker request limits.
-- Top-down Google discovery every 2 hours (Serper, 104 credits/run): new companies are added and scanned immediately, known boards with fresh postings are scanned first, and postings on ATSs without an API (Workday, iCIMS, Jobvite, JazzHR, Teamtailor, BambooHR) go straight into the feed marked unverified.
+- Role matcher rebuilt from a ~200-title target list (all 205 titles match; managers, interns, sales, data-center roles excluded).
+- Top-down Google discovery every 3 hours (Serper, 96 searches / 156 credits per run): new companies are added and scanned immediately, known boards with fresh postings are scanned first, and postings on ATSs without an API (Workday, iCIMS, Jobvite, JazzHR, Teamtailor, BambooHR) go straight into the feed marked unverified.
 - Removed the Brave/Google job-search experiment, coverage audit, ChatGPT auth helper, and HTML-scraping connectors.
 
 ## V2.0 alpha 1 — Isolated coverage audit

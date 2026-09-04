@@ -23,12 +23,13 @@ tracks your application status per job.
    If the host does not run cron triggers, point any external scheduler at
    `POST /api/internal/hourly`.
 
-6. **Top-down discovery** — every 2 hours (if `SERPER_API_KEY` is set; `DISCOVERY_INTERVAL_HOURS`
-   to change) `lib/discovery.ts` runs 64 Google searches restricted to the past 24 hours across 16 ATS
-   domains. Companies not yet in the catalog are added and scanned right away; known boards with a fresh
-   hit are scanned first; postings on ATSs without a public API (Workday, iCIMS, Jobvite, JazzHR,
-   Teamtailor, BambooHR) go straight into the feed marked *unverified*. Cost: 104 Serper credits per run,
-   ~1,250/day at the default interval (a 50,000-credit pack lasts ~40 days; every 3 hours → ~60 days).
+6. **Top-down discovery** — every 3 hours (if `SERPER_API_KEY` is set; `DISCOVERY_INTERVAL_HOURS`
+   to change) `lib/discovery.ts` runs 96 Google searches (16 ATS domains × 6 keyword groups built from
+   the ~200 target titles in `lib/roles.ts`) restricted to the past 24 hours. Companies not yet in the
+   catalog are added and scanned right away; known boards with a fresh hit are scanned first; postings
+   on ATSs without a public API (Workday, iCIMS, Jobvite, JazzHR, Teamtailor, BambooHR) go straight into
+   the feed marked *unverified*. Cost: 156 Serper credits per run, ~1,250/day at the default interval
+   (a 50,000-credit pack lasts ~40 days; every 2 hours → ~27 days).
 
 ## Local setup
 
@@ -43,7 +44,7 @@ The hosted version uses a Cloudflare D1 binding named `DB`. Optional env vars:
 
 ```text
 SERPER_API_KEY            # Google top-down discovery (optional but recommended)
-DISCOVERY_INTERVAL_HOURS  # default 2
+DISCOVERY_INTERVAL_HOURS  # default 3
 RESEND_API_KEY     # email digest
 JOB_ALERT_EMAIL    # where the digest goes
 JOB_ALERT_FROM     # optional sender

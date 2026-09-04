@@ -11,6 +11,7 @@ export const roleFamilies = [
   "Software Engineer, Data/ML",
   "Business Intelligence",
   "Forward Deployed / GTM Engineer",
+  "Solutions / Customer Engineer",
   "Cloud / DevOps Engineer",
   "Product Engineer",
 ] as const;
@@ -18,22 +19,25 @@ export const roleFamilies = [
 export type RoleFamily = (typeof roleFamilies)[number];
 
 // Order matters: the first matching family wins, so the more specific patterns come first.
+// Patterns are deliberately token-based ("data … engineer") so title variants are caught without listing each one.
+const role = "(?:engineer(?:ing)?|developer|specialist)";
 const familyPatterns: Array<{ family: RoleFamily; pattern: RegExp }> = [
-  { family: "Forward Deployed / GTM Engineer", pattern: /\bforward[- ]deployed[^\n]{0,30}\b(?:engineer|scientist|developer)\b|\bdeployed (?:ai |ml |software )?engineer\b|\b(?:gtm|go[- ]to[- ]market) engineer\b|\bsolutions? engineer,? (?:ai|ml|data)\b/i },
-  { family: "Analytics Engineer", pattern: /\banalytics engineer(?:ing)?\b/i },
-  { family: "Business Intelligence", pattern: /\b(?:business intelligence|\bbi\b)(?: developer| engineer| analyst)?\b/i },
-  { family: "Data Engineer", pattern: /\b(?:data|etl|elt|data ?warehouse|data platform|data infrastructure|data pipeline|data integration|data reliability|data ops|dataops|big data|spark|snowflake|databricks|dbt) (?:platform |infrastructure |integration |reliability |pipeline |warehouse |ops |ops |software |solutions )?engineer(?:ing)?\b|\bengineer,? (?:big )?data(?: (?:platform|infrastructure|engineering|pipelines?|warehouse))?\b|\bdata engineering\b|\b(?:etl|elt|data ?warehouse|dbt|snowflake|databricks|data) developer\b/i },
-  { family: "Data Scientist", pattern: /\b(?:data|decision|applied) scientist\b|\bdata science\b|\bquantitative (?:analyst|researcher)\b|\bstatistician\b/i },
-  { family: "Data Analyst", pattern: /\b(?:data|product|business|analytics|marketing|growth|insights?) analyst\b|\banalytics (?:lead|specialist|consultant)\b|\bdata analytics\b/i },
-  { family: "ML Engineer", pattern: /\b(?:machine learning|\bml\b|mlops|ml ?ops|deep learning|nlp|computer vision|recommendation|ranking|llm|genai|gen ai|generative ai)(?: (?:platform|infrastructure|infra|research|software|systems|ops|applied|inference|training))* engineer(?:ing)?\b|\bengineer,? (?:machine learning|ml|mlops|llm|genai|deep learning|nlp)\b|\bresearch engineer\b/i },
-  { family: "AI Engineer", pattern: /\b(?:applied |generative |conversational |agentic )?(?:ai|artificial intelligence|agent|agents|llm|prompt)(?: (?:platform|infrastructure|product|software|systems|applied|solutions))* engineer(?:ing)?\b|\bengineer,? (?:applied )?ai\b|\bai (?:developer|specialist|technologist)\b|\bmember of technical staff\b/i },
-  { family: "Software Engineer, Data/ML", pattern: /\b(?:software|backend|back-end|fullstack|full-stack|full stack|platform|infrastructure|staff|senior|principal|founding) engineer(?:ing)?[^\n]{0,50}\b(?:data|analytics|ml|machine learning|ai|llm|search|ranking|pipelines?|warehouse|lakehouse|streaming|kafka|spark|ai product|ai platform|ml platform|data platform|ai infrastructure)\b/i },
+  { family: "Forward Deployed / GTM Engineer", pattern: new RegExp(`\\bforward[- ]deployed[^\\n]{0,30}\\b(?:engineer|scientist|developer)\\b|\\bdeployed (?:ai |ml |software )?engineer\\b|\\b(?:gtm|go[- ]to[- ]market|growth|revenue operations|revops|sales ops|marketing ops)[^\\n]{0,30}\\b(?:engineer|developer|specialist|automation)\\b|\\bai automation specialist\\b`, "i") },
+  { family: "Solutions / Customer Engineer", pattern: new RegExp(`\\b(?:solutions?|implementation|customer|deployment|integration) engineer[^\\n]{0,25}\\b(?:data|ai|ml|cloud|analytics|platform)\\b|\\b(?:data|ai|ml|cloud|analytics) solutions? engineer\\b|\\bcustomer data engineer\\b`, "i") },
+  { family: "Analytics Engineer", pattern: new RegExp(`\\banalytics[^\\n]{0,25}\\b(?:engineer(?:ing)?|developer)\\b|\\b(?:data )?visuali[sz]ation[^\\n]{0,20}\\b(?:engineer|developer)\\b|\\b(?:tableau|looker|power ?bi|qlik|sigma) (?:developer|engineer)\\b`, "i") },
+  { family: "Business Intelligence", pattern: new RegExp(`\\b(?:business intelligence|\\bbi\\b)[^\\n]{0,20}\\b(?:developer|engineer(?:ing)?|analyst)\\b`, "i") },
+  { family: "Data Scientist", pattern: /\b(?:data|decision|applied|ai|ml|machine learning) scientist\b|\bdata science\b|\bquantitative (?:analyst|researcher)\b|\bstatistician\b/i },
+  { family: "Data Analyst", pattern: /\b(?:data|product|business|analytics|marketing|growth|insights?|bi|reporting) analyst\b|\banalytics (?:lead|specialist|consultant)\b|\bdata analytics\b/i },
+  { family: "ML Engineer", pattern: new RegExp(`\\b(?:machine learning|\\bml\\b|mlops|ml ?ops|deep learning|nlp|computer vision|recommendations?|ranking|llm|genai|gen ai|generative ai|rag|retrieval)[^\\n]{0,30}\\b${role}\\b|\\b${role},? (?:machine learning|ml|mlops|llm|genai|deep learning|nlp)\\b|\\bresearch engineer\\b`, "i") },
+  { family: "AI Engineer", pattern: new RegExp(`\\b(?:ai|artificial intelligence|agentic|agents?|llm|prompt|evaluations?)[^\\n]{0,30}\\b${role}\\b|\\b${role},? (?:applied |generative |agentic )?ai\\b|\\bmember of technical staff\\b`, "i") },
+  { family: "Data Engineer", pattern: new RegExp(`\\b(?:data|etl|elt|etl/elt|dataops|big data|spark|pyspark|kafka|flink|airflow|dbt|snowflake|databricks|nifi|hadoop|dataiku|palantir foundry|foundry|lakehouse|streaming|pipelines?|warehouse)[^\\n]{0,30}\\b${role}\\b|\\b${role},? (?:big )?data\\b|\\bdata engineering\\b`, "i") },
+  { family: "Software Engineer, Data/ML", pattern: /\b(?:software|backend|back-end|fullstack|full-stack|full stack|platform|infrastructure|staff|senior|principal|founding) engineer(?:ing)?[^\n]{0,50}\b(?:data|analytics|ml|machine learning|ai|llm|search|ranking|pipelines?|warehouse|lakehouse|streaming|kafka|spark|bi)\b/i },
   { family: "Cloud / DevOps Engineer", pattern: /\b(?:cloud|aws|gcp|google cloud|azure|devops|dev ops|multi-cloud) (?:platform |infrastructure |solutions |systems |software |ops )?engineer(?:ing)?\b/i },
   { family: "Product Engineer", pattern: /\bproduct engineer(?:ing)?\b/i },
 ];
 
 // Titles that are technically matched but not the kind of job worth applying to here.
-const excludedTitle = /\b(?:director|manager|head of|vp|vice president|chief|cto|cio|intern(?:ship)?|co-?op|apprentice|student|fellow|professor|recruiter|sales|account executive|account manager|evangelist|instructor|teacher|trainer|clerk|technician|electrician|mechanical|electrical|civil|structural|hvac|data center|data centre|datacenter)\b/i;
+const excludedTitle = /\b(?:director|manager|head of|vp|vice president|chief|cto|cio|intern(?:ship)?|co-?op|apprentice|student|fellow|professor|recruiter|sales representative|sales development|account executive|account manager|evangelist|instructor|teacher|trainer|clerk|technician|electrician|mechanical|electrical|civil|structural|hvac|data center|data centre|datacenter|data entry|warehouse associate|forklift|nurse|clinical)\b/i;
 
 export function classifyRole(title: string): RoleFamily | null {
   const clean = title.replace(/\s+/g, " ").trim();

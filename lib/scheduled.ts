@@ -5,7 +5,7 @@ import { getState, setState } from "./state";
 
 /**
  * What the Worker cron runs every 15 minutes:
- *   1. Google discovery when it is due (default every 2 hours, DISCOVERY_INTERVAL_HOURS to change) — finds
+ *   1. Google discovery when it is due (default every 3 hours, DISCOVERY_INTERVAL_HOURS to change) — finds
  *      new company boards, bumps boards with fresh hits, and adds unverified jobs from unsupported ATSs.
  *   2. Validate pending boards (newly discovered ones first).
  *   3. Scan boards that are due: bumped/new boards first, then productive boards older than 2 hours,
