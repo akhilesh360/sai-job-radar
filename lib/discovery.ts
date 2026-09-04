@@ -42,6 +42,16 @@ const atsHosts: Array<{ ats: string; hosts: string[]; supported: boolean }> = [
   { ats: "UKG", hosts: ["ultipro.com"], supported: false },
   { ats: "Phenom", hosts: ["phenompro.com"], supported: false },
   { ats: "Eightfold", hosts: ["eightfold.ai"], supported: false },
+  // Direct-employer SMB / mid-market suites, also search-only.
+  { ats: "Cornerstone", hosts: ["csod.com"], supported: false },
+  { ats: "ClearCompany", hosts: ["clearcompany.com"], supported: false },
+  { ats: "Homerun", hosts: ["homerun.co"], supported: false },
+  { ats: "Trakstar", hosts: ["trakstar.com", "recruiterbox.com"], supported: false },
+  { ats: "ApplicantPro", hosts: ["applicantpro.com"], supported: false },
+  { ats: "Newton", hosts: ["newtonsoftware.com"], supported: false },
+  { ats: "Hirebridge", hosts: ["hirebridge.com"], supported: false },
+  { ats: "PeopleFluent", hosts: ["peoplefluent.com"], supported: false },
+  { ats: "ZohoRecruit", hosts: ["zohorecruit.com"], supported: false },
   { ats: "BambooHR", hosts: ["bamboohr.com"], supported: true },
   { ats: "JobScore", hosts: ["careers.jobscore.com"], supported: true },
 ];
@@ -81,14 +91,22 @@ export function parseSourceUrl(rawUrl: string, origin = "google-discovery"): Par
     const match = atsHosts.find(item => item.hosts.some(value => host === value || host.endsWith(`.${value}`)));
     if (!match) return null;
     let slug = parts[0] ?? "";
-    if (["Recruitee", "Breezy", "Pinpoint", "Teamtailor", "BambooHR", "iCIMS", "Taleo", "Phenom", "Eightfold"].includes(match.ats)) slug = host.split(".")[0];
+    if (["Recruitee", "Breezy", "Pinpoint", "Teamtailor", "BambooHR", "iCIMS", "Taleo", "Phenom", "Eightfold",
+      "Cornerstone", "ClearCompany", "Homerun", "Trakstar", "ApplicantPro", "Newton", "PeopleFluent", "ZohoRecruit"].includes(match.ats)) slug = host.split(".")[0];
+    // Hirebridge serves every employer from jobs.hirebridge.com and identifies them by ?cid=.
+    if (match.ats === "Hirebridge") slug = url.searchParams.get("cid") ?? "";
     // SuccessFactors career sites share a few hosts (career5.successfactors.com, …) and identify the employer by ?company=.
     if (match.ats === "SuccessFactors") slug = url.searchParams.get("company") ?? host.split(".")[0];
     // JobScore URLs are careers.jobscore.com/careers/<company>/... or /jobs/<company>/feed.json.
     if (match.ats === "JobScore") slug = ["careers", "jobs"].includes((parts[0] ?? "").toLowerCase()) ? parts[1] ?? "" : "";
-    if (!slug || ["embed", "jobs", "job", "careers", "apply", "j", "o", "p", "www"].includes(slug.toLowerCase())) return null;
     slug = decodeURIComponent(slug).trim().replace(/[?#].*$/, "");
-    if (!/^[a-z0-9][a-z0-9._ -]{0,80}$/i.test(slug)) return null;
+    const reserved = ["embed", "jobs", "job", "careers", "apply", "j", "o", "p", "www"];
+    if (!slug || reserved.includes(slug.toLowerCase()) || !/^[a-z0-9][a-z0-9._ -]{0,80}$/i.test(slug)) {
+      // A readable board needs a real slug. A search-only result only needs a company name, which comes from the
+      // Google title anyway — so keep it under a generic slug, unless it is the vendor's own www marketing site.
+      if (match.supported || host.startsWith("www.")) return null;
+      slug = match.ats.toLowerCase();
+    }
     const id = `${match.ats}:${slug}`.toLowerCase();
     const boardUrl = match.ats === "JobScore" ? `https://${host}/careers/${encodeURIComponent(slug)}`
       : parts[0] === slug ? `https://${host}/${encodeURIComponent(slug)}` : `https://${host}`;
