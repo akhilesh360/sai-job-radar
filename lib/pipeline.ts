@@ -4,7 +4,7 @@ import { getDb } from "../db";
 import { ingestionRuns, jobs, sourceBoards } from "../db/schema";
 import { boardKeyPrefix, enabledAts, fetchBoardJobs, type CanonicalJob } from "./ats-connectors";
 import { defaultSources } from "./default-sources";
-import { getState, setState } from "./state";
+import { setState } from "./state";
 
 type Db = ReturnType<typeof getDb>;
 type SourceRow = typeof sourceBoards.$inferSelect;
@@ -47,15 +47,18 @@ export async function validatePendingSources(limit = 30, concurrency = 6) {
     .where(and(eq(sourceBoards.status, "pending"), inArray(sourceBoards.ats, enabledAts)))
     .orderBy(asc(originPriority), asc(sourceBoards.id)).limit(Math.min(60, Math.max(1, limit)));
   let active = 0, invalid = 0;
-  const updates = await mapWithConcurrency(pending, concurrency, async source => {
+  // Statements are collected rather than returned: a drizzle query is a thenable, so returning one from an
+  // async callback would execute it on the spot and hand runBatch already-run results instead of statements.
+  const updates: Statement[] = [];
+  await mapWithConcurrency(pending, concurrency, async source => {
     const at = now();
     try {
       const found = await fetchBoardJobs(source);
       active++;
-      return db.update(sourceBoards).set({ status: "active", active: true, lastValidatedAt: at, lastError: null, consecutiveFailures: 0, lastJobCount: found.length, updatedAt: at }).where(eq(sourceBoards.id, source.id));
+      updates.push(db.update(sourceBoards).set({ status: "active", active: true, lastValidatedAt: at, lastError: null, consecutiveFailures: 0, lastJobCount: found.length, updatedAt: at }).where(eq(sourceBoards.id, source.id)));
     } catch (error) {
       invalid++;
-      return db.update(sourceBoards).set({ status: "invalid", active: false, lastValidatedAt: at, lastError: error instanceof Error ? error.message : "Validation failed", consecutiveFailures: 1, updatedAt: at }).where(eq(sourceBoards.id, source.id));
+      updates.push(db.update(sourceBoards).set({ status: "invalid", active: false, lastValidatedAt: at, lastError: error instanceof Error ? error.message : "Validation failed", consecutiveFailures: 1, updatedAt: at }).where(eq(sourceBoards.id, source.id)));
     }
   });
   if (updates.length) await runBatch(db, updates);

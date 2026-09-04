@@ -81,7 +81,8 @@ export default function Home() {
 
   // Load on open, then refresh every 5 minutes so jobs found by the background scans appear without a reload.
   useEffect(() => {
-    void Promise.all([loadJobs(), loadSourceStats()]);
+    // Kicked off from a callback: the loaders only set state after their fetches resolve, never synchronously.
+    void Promise.resolve().then(() => Promise.all([loadJobs(), loadSourceStats()]));
     const timer = setInterval(() => { if (!scanningRef.current) void Promise.all([loadJobs(), loadSourceStats()]); }, 5 * 60 * 1000);
     return () => clearInterval(timer);
   }, []);
