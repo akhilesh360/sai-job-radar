@@ -1,6 +1,7 @@
-/** Cloudflare Worker entry point for the vinext-starter template. */
+/** Cloudflare Worker entry point: serves the app and runs the scheduled board scans. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { runScheduledMaintenance } from "../lib/scheduled";
 
 interface Env {
   ASSETS: Fetcher;
@@ -19,12 +20,6 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
-// Image security config. SVG sources with .svg extension auto-skip the
-// optimization endpoint on the client side (served directly, no proxy).
-// To route SVGs through the optimizer (with security headers), set
-// dangerouslyAllowSVG: true in next.config.js and uncomment below:
-// const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
-
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -41,6 +36,12 @@ const worker = {
     }
 
     return handler.fetch(request, env, ctx);
+  },
+
+  // Runs on the cron trigger configured in vite.config.ts / wrangler. Each run validates a slice of
+  // pending boards and re-scans the stalest active boards, so the feed keeps refreshing on its own.
+  async scheduled(_event: unknown, _env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(runScheduledMaintenance().catch(error => console.error("scheduled scan failed", error)));
   },
 };
 

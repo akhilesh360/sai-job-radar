@@ -40,3 +40,5 @@ next-env.d.ts
 /.sites-runtime/
 /outputs/
 /work/
+/tsconfig.tsbuildinfo
+/worker-configuration.d.ts

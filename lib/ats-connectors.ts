@@ -1,77 +1,161 @@
-import { isAllowedTargetTitle as matchesTargetRole } from "./job-discovery";
+import { isTargetTitle } from "./roles";
+import { isUsLocation, workplaceType } from "./locations";
 
-export type SourceBoard={id:string;ats:string;slug:string;companyName:string};
-export type CanonicalJob={
-  id:string;canonicalKey:string;title:string;company:string;location:string;workplace:string;
-  source:string;externalJobId:string;sourceUrl:string;applyUrl:string;postedAt:string|null;
-  discoveredAt:string;lastSeenAt:string;status:string;isSeed:boolean;
+export type SourceBoard = { id: string; ats: string; slug: string; companyName: string };
+export type CanonicalJob = {
+  id: string; canonicalKey: string; title: string; company: string; location: string; workplace: string;
+  source: string; externalJobId: string; sourceUrl: string; applyUrl: string; postedAt: string | null;
+  discoveredAt: string; lastSeenAt: string; status: string; isSeed: boolean;
 };
 
-const usSignals=/\b(United States|U\.S\.|US Remote|Remote[, /-]+US|USA|Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming|District of Columbia|Washington,? DC)\b/i;
-const stateCode=/\b(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)\b/;
-const foreignSignals=/\b(Canada|Canadian|United Kingdom|UK|Europe|EMEA|India|Australia|New Zealand|Singapore|Germany|France|Spain|Italy|Netherlands|Ireland|Japan|China|Mexico|Brazil|Argentina|Philippines|Poland|Sweden|Norway|Denmark|Finland|Uttar Pradesh|Maharashtra|Karnataka|Telangana|Tamil Nadu|Delhi|Haryana|Gujarat|West Bengal|Rajasthan|Kerala|Andhra Pradesh|Madhya Pradesh|Odisha)\b/i;
-export function isUsLocation(location:string){const clean=location.trim();if(usSignals.test(clean))return true;if(foreignSignals.test(clean))return false;if(stateCode.test(clean))return true;return /^remote(?:\s*[-,/|]\s*(?:anywhere|global|worldwide))?$/i.test(clean)}
-function workplace(location:string){if(/remote/i.test(location))return "Remote";if(/hybrid/i.test(location))return "Hybrid";return location?"Onsite":"Unknown"}
-function key(source:string,company:string,id:string){return `${source}:${company}:${id}`.toLowerCase().replace(/[^a-z0-9:]+/g,"-")}
-function canonical(source:SourceBoard,id:string,title:string,location:string,applyUrl:string,postedAt:string|null):CanonicalJob{
-  const now=new Date().toISOString(),jobKey=key(source.ats,source.slug,id);
-  return {id:jobKey,canonicalKey:jobKey,title,company:source.companyName,location,workplace:workplace(location),source:source.ats,externalJobId:id,sourceUrl:applyUrl,applyUrl,postedAt,discoveredAt:now,lastSeenAt:now,status:"New",isSeed:false};
-}
-async function json(url:string){const response=await fetch(url,{headers:{accept:"application/json","user-agent":"SaiJobRadar/1.0"}});if(!response.ok)throw new Error(`${response.status} ${response.statusText}`);return response.json()}
-async function html(url:string){const response=await fetch(url,{headers:{accept:"text/html","user-agent":"SaiJobRadar/1.0"}});if(!response.ok)throw new Error(`${response.status} ${response.statusText}`);return response.text()}
-function cleanHtml(value:string){return value.replace(/<[^>]*>/g," ").replace(/&amp;/g,"&").replace(/&#39;|&apos;/g,"'").replace(/&quot;/g,'"').replace(/&nbsp;/g," ").replace(/\s+/g," ").trim()}
-function absoluteUrl(raw:string,base:string){try{return new URL(raw,base).toString()}catch{return raw}}
-function jsonLdPostings(page:string){const found:Array<Record<string,unknown>>=[];for(const script of page.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)){try{const parsed=JSON.parse(script[1]);const values=Array.isArray(parsed)?parsed:parsed?.["@graph"]??[parsed];for(const value of values)if(value?.["@type"]==="JobPosting")found.push(value)}catch{}}return found}
+type Raw = Record<string, unknown>;
 
-export async function fetchBoardJobs(source:SourceBoard):Promise<CanonicalJob[]>{
-  if(source.ats==="Ashby"){
-    const data=await json(`https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(source.slug)}`) as {jobs?:Array<Record<string,unknown>>};
-    return (data.jobs??[]).flatMap(raw=>{const title=String(raw.title??""),location=String(raw.location??""),id=String(raw.id??raw.jobUrl??title);if(!matchesTargetRole(title)||!isUsLocation(location))return[];const applyUrl=String(raw.applyUrl??raw.jobUrl??`https://jobs.ashbyhq.com/${source.slug}`);return[canonical(source,id,title,location,applyUrl,raw.publishedAt?String(raw.publishedAt):null)]});
-  }
-  if(source.ats==="Greenhouse"){
-    const data=await json(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(source.slug)}/jobs`) as {jobs?:Array<Record<string,unknown>>};
-    return (data.jobs??[]).flatMap(raw=>{const title=String(raw.title??""),location=String((raw.location as Record<string,unknown>|undefined)?.name??""),id=String(raw.id??raw.absolute_url??title);if(!matchesTargetRole(title)||!isUsLocation(location))return[];const applyUrl=String(raw.absolute_url??`https://job-boards.greenhouse.io/${source.slug}`);return[canonical(source,id,title,location,applyUrl,raw.updated_at?String(raw.updated_at):null)]});
-  }
-  if(source.ats==="Lever"){
-    const data=await json(`https://api.lever.co/v0/postings/${encodeURIComponent(source.slug)}?mode=json`) as Array<Record<string,unknown>>;
-    return data.flatMap(raw=>{const title=String(raw.text??""),location=String((raw.categories as Record<string,unknown>|undefined)?.location??""),id=String(raw.id??raw.hostedUrl??title);if(!matchesTargetRole(title)||!isUsLocation(location))return[];const applyUrl=String(raw.applyUrl??raw.hostedUrl??`https://jobs.lever.co/${source.slug}`);return[canonical(source,id,title,location,applyUrl,raw.createdAt?new Date(Number(raw.createdAt)).toISOString():null)]});
-  }
-  if(source.ats==="SmartRecruiters"){
-    const data=await json(`https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(source.slug)}/postings?limit=100`) as {content?:Array<Record<string,unknown>>};
-    return (data.content??[]).flatMap(raw=>{const title=String(raw.name??""),loc=raw.location as Record<string,unknown>|undefined,location=[loc?.city,loc?.region,loc?.country].filter(Boolean).join(", "),id=String(raw.id??title);if(!matchesTargetRole(title)||!isUsLocation(location))return[];const applyUrl=`https://jobs.smartrecruiters.com/${source.slug}/${id}`;return[canonical(source,id,title,location,applyUrl,raw.releasedDate?String(raw.releasedDate):null)]});
-  }
-  if(source.ats==="Recruitee"){
-    const data=await json(`https://${encodeURIComponent(source.slug)}.recruitee.com/api/offers/`) as {offers?:Array<Record<string,unknown>>};
-    return (data.offers??[]).flatMap(raw=>{const title=String(raw.title??""),country=raw.country_code==="US"?"United States":raw.country_code,location=[raw.city,raw.state_code,country].filter(Boolean).join(", ")||(raw.remote?"Remote":""),id=String(raw.id??raw.slug??title);if(!matchesTargetRole(title)||!isUsLocation(location))return[];const applyUrl=String(raw.careers_url??`https://${source.slug}.recruitee.com/o/${raw.slug??""}`),companyName=String(raw.company_name??source.companyName);return[canonical({...source,companyName},id,title,location,applyUrl,raw.published_at?new Date(String(raw.published_at)).toISOString():null)]});
-  }
-  if(source.ats==="Breezy"){
-    const data=await json(`https://${encodeURIComponent(source.slug)}.breezy.hr/json`) as Array<Record<string,unknown>>;
-    return data.flatMap(raw=>{const title=String(raw.name??""),loc=raw.location as Record<string,unknown>|undefined,country=loc?.country as Record<string,unknown>|undefined,state=loc?.state as Record<string,unknown>|undefined,location=String(loc?.name??[loc?.city,state?.name,country?.name].filter(Boolean).join(", ")??"");const id=String(raw.id??raw.friendly_id??title);if(!matchesTargetRole(title)||!isUsLocation(location))return[];const applyUrl=String(raw.url??`https://${source.slug}.breezy.hr/p/${raw.friendly_id??id}`);return[canonical(source,id,title,location,applyUrl,raw.published_date?String(raw.published_date):null)]});
-  }
-  if(source.ats==="Workable"){
-    const data=await json(`https://apply.workable.com/api/v1/widget/accounts/${encodeURIComponent(source.slug)}`) as {jobs?:Array<Record<string,unknown>>};
-    return (data.jobs??[]).flatMap(raw=>{const title=String(raw.title??""),locations=raw.locations as Array<Record<string,unknown>>|undefined,explicitCountries=(locations??[]).map(loc=>String(loc.countryCode??loc.country??"").trim()).filter(Boolean),hasUsCountry=explicitCountries.some(country=>/^(US|USA|United States(?: of America)?)$/i.test(country)),location=(locations??[]).map(loc=>[loc.city,loc.region,loc.countryCode==="US"?"United States":loc.countryCode??loc.country].filter(Boolean).join(", ")).filter(Boolean).join(" | ")||[raw.city,raw.state,raw.country].filter(Boolean).join(", "),id=String(raw.shortcode??raw.code??title);if((explicitCountries.length>0&&!hasUsCountry)||!matchesTargetRole(title)||!isUsLocation(location))return[];const applyUrl=`https://apply.workable.com/${source.slug}/j/${id}`;return[canonical(source,id,title,location,applyUrl,raw.published_on?String(raw.published_on):null)]});
-  }
-  if(source.ats==="JazzHR"){
-    const board=await html(`https://${encodeURIComponent(source.slug)}.applytojob.com/apply`),links=[...board.matchAll(/<a[^>]+href=["'](https?:\/\/[^"']+\/apply\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
-    const targets=new Map<string,string>();for(const match of links){const title=cleanHtml(match[2]);if(matchesTargetRole(title))targets.set(match[1],title)}
-    const found=await Promise.all([...targets].slice(0,12).map(async([url,fallbackTitle])=>{try{const page=await html(url),scripts=[...page.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];let posting:Record<string,unknown>|null=null;for(const script of scripts)try{const parsed=JSON.parse(script[1]) as Record<string,unknown>;if(parsed["@type"]==="JobPosting"){posting=parsed;break}}catch{}if(!posting)return null;const title=String(posting.title??fallbackTitle),address=((posting.jobLocation as Record<string,unknown>|undefined)?.address??{}) as Record<string,unknown>,location=[address.addressLocality,address.addressRegion,address.addressCountry].filter(Boolean).join(", ")||(posting.jobLocationType==="TELECOMMUTE"?"Remote":""),id=new URL(url).pathname.split("/").filter(Boolean)[1]??url;if(!matchesTargetRole(title)||!isUsLocation(location))return null;const org=posting.hiringOrganization as Record<string,unknown>|undefined;return canonical({...source,companyName:String(org?.name??source.companyName)},id,title,location,url,posting.datePosted?String(posting.datePosted):null)}catch{return null}}));return found.filter((job):job is CanonicalJob=>Boolean(job));
-  }
-  if(source.ats==="Pinpoint"){
-    const data=await json(`https://${encodeURIComponent(source.slug)}.pinpointhq.com/postings.json`) as {data?:Array<Record<string,unknown>>};
-    return (data.data??[]).flatMap(raw=>{const title=String(raw.title??raw.name??""),loc=raw.location as Record<string,unknown>|undefined,locations=raw.locations as Array<Record<string,unknown>>|undefined,location=String(loc?.name??[loc?.city,loc?.province,loc?.country].filter(Boolean).join(", ")??"")||(locations??[]).map(item=>String(item.name??[item.city,item.province,item.country].filter(Boolean).join(", "))).filter(Boolean).join(" | ")||(raw.workplace_type==="remote"?"Remote":""),rawUrl=String(raw.url??raw.absolute_url??raw.posting_url??""),id=String(raw.id??raw.uuid??rawUrl.split("/").filter(Boolean).at(-1)??title);if(!matchesTargetRole(title)||!isUsLocation(location))return[];const applyUrl=rawUrl?absoluteUrl(rawUrl,`https://${source.slug}.pinpointhq.com`):`https://${source.slug}.pinpointhq.com/jobs/${id}`,companyName=String(raw.company_name??source.companyName),posted=raw.published_at??raw.posted_at??raw.created_at;return[canonical({...source,companyName},id,title,location,applyUrl,posted?String(posted):null)]});
-  }
-  if(source.ats==="Comeet"){
-    const [tenant,boardCode]=source.slug.split("|");if(!tenant||!boardCode)throw new Error("Invalid Comeet board");const boardUrl=`https://www.comeet.com/jobs/${encodeURIComponent(tenant)}/${encodeURIComponent(boardCode)}`,page=await html(boardUrl),bootstrap=page.match(/COMPANY_DATA\s*=\s*(\{[\s\S]*?\})\s*;/);if(!bootstrap)throw new Error("Comeet board bootstrap unavailable");const company=JSON.parse(bootstrap[1]) as Record<string,unknown>,companyUid=String(company.company_uid??company.uid??""),token=String(company.token??"");if(!companyUid||!token)throw new Error("Comeet board credentials unavailable");
-    const positions=await json(`https://www.comeet.co/careers-api/2.0/company/${encodeURIComponent(companyUid)}/positions?token=${encodeURIComponent(token)}&details=false`) as Array<Record<string,unknown>>;
-    return positions.flatMap(raw=>{const title=String(raw.name??raw.title??""),loc=raw.location as Record<string,unknown>|undefined,country=loc?.country==="US"?"United States":loc?.country,location=String(loc?.name??[loc?.city,loc?.state,country].filter(Boolean).join(", ")??"")||(raw.workplace_type==="Remote"?"Remote":""),id=String(raw.uid??raw.id??title);if(!matchesTargetRole(title)||!isUsLocation(location))return[];const applyUrl=String(raw.url_comeet_hosted_page??raw.url_active_page??`${boardUrl}/${id}`),companyName=String(raw.company_name??company.name??source.companyName);return[canonical({...source,companyName},id,title,location,applyUrl,raw.time_updated?String(raw.time_updated):null)]});
-  }
-  if(source.ats==="Jobvite"){
-    const boardUrl=`https://jobs.jobvite.com/${encodeURIComponent(source.slug)}`,board=await html(boardUrl),targets=new Map<string,string>();for(const row of board.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)){const body=row[1],anchor=body.match(/<a[^>]+href=["']([^"']*\/job\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/i);if(!anchor)continue;const title=cleanHtml(anchor[2]);if(matchesTargetRole(title))targets.set(absoluteUrl(anchor[1],boardUrl),title)}
-    const found=await Promise.all([...targets].slice(0,15).map(async([url,fallbackTitle])=>{try{const page=await html(url),posting=jsonLdPostings(page)[0];if(posting){const title=String(posting.title??fallbackTitle),jobLocation=posting.jobLocation,locations=Array.isArray(jobLocation)?jobLocation:[jobLocation],location=locations.filter(Boolean).map(value=>{const address=(value as Record<string,unknown>).address as Record<string,unknown>|undefined;return [address?.addressLocality,address?.addressRegion,address?.addressCountry].filter(Boolean).join(", ")}).filter(Boolean).join(" | ")||(posting.jobLocationType==="TELECOMMUTE"?"Remote":""),id=new URL(url).pathname.split("/").filter(Boolean).at(-1)??url;if(!matchesTargetRole(title)||!isUsLocation(location))return null;const org=posting.hiringOrganization as Record<string,unknown>|undefined;return canonical({...source,companyName:String(org?.name??source.companyName)},id,title,location,url,posting.datePosted?String(posting.datePosted):null)}
-      const titleMatch=page.match(/<h[12][^>]*>([\s\S]*?)<\/h[12]>/i),title=cleanHtml(titleMatch?.[1]??fallbackTitle),locationMatch=page.match(/(?:jv-job-detail-meta|job-location)[^>]*>([\s\S]*?)<\//i),location=cleanHtml(locationMatch?.[1]??"");if(!matchesTargetRole(title)||!isUsLocation(location))return null;const id=new URL(url).pathname.split("/").filter(Boolean).at(-1)??url;return canonical(source,id,title,location,url,null)}catch{return null}}));return found.filter((job):job is CanonicalJob=>Boolean(job));
-  }
-  throw new Error(`${source.ats} connector is not enabled yet`);
+// Every connector below is a public JSON endpoint, no credentials and no HTML scraping.
+export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling"];
+
+export function boardKeyPrefix(source: SourceBoard) {
+  return `${source.ats}:${source.slug}:`.toLowerCase().replace(/[^a-z0-9:]+/g, "-");
 }
 
-export const enabledAts=["Ashby","Greenhouse","Lever","SmartRecruiters","Recruitee","Breezy","Workable","JazzHR","Jobvite","Comeet","Pinpoint"];
+function key(source: SourceBoard, id: string) {
+  return `${boardKeyPrefix(source)}${id}`.toLowerCase().replace(/[^a-z0-9:]+/g, "-");
+}
+
+function iso(value: unknown): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  const date = typeof value === "number" ? new Date(value) : new Date(String(value));
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function canonical(source: SourceBoard, id: string, title: string, location: string, applyUrl: string, postedAt: unknown): CanonicalJob {
+  const now = new Date().toISOString(), jobKey = key(source, id);
+  const cleanTitle = title.replace(/\s+/g, " ").trim(), cleanLocation = location.replace(/\s+/g, " ").trim();
+  return { id: jobKey, canonicalKey: jobKey, title: cleanTitle, company: source.companyName, location: cleanLocation, workplace: workplaceType(cleanLocation), source: source.ats, externalJobId: id, sourceUrl: applyUrl, applyUrl, postedAt: iso(postedAt), discoveredAt: now, lastSeenAt: now, status: "New", isSeed: false };
+}
+
+function keep(title: string, location: string) {
+  return isTargetTitle(title) && isUsLocation(location);
+}
+
+async function json<T>(url: string): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const response = await fetch(url, { headers: { accept: "application/json", "user-agent": "SaiJobRadar/2.0" }, signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json() as T;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const str = (value: unknown) => (value === null || value === undefined ? "" : String(value));
+const joinParts = (...parts: unknown[]) => parts.map(str).map(part => part.trim()).filter(Boolean).join(", ");
+
+export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[]> {
+  const slug = encodeURIComponent(source.slug.trim());
+
+  if (source.ats === "Ashby") {
+    const data = await json<{ jobs?: Raw[] }>(`https://api.ashbyhq.com/posting-api/job-board/${slug}?includeCompensation=false`);
+    return (data.jobs ?? []).flatMap(raw => {
+      if (raw.isListed === false) return [];
+      const title = str(raw.title);
+      const secondary = (raw.secondaryLocations as Raw[] | undefined ?? []).map(item => str(item.location)).filter(Boolean);
+      const location = [str(raw.location), ...secondary].filter(Boolean).join("; ") || (raw.isRemote ? "Remote" : "");
+      if (!keep(title, location)) return [];
+      const id = str(raw.id) || str(raw.jobUrl) || title;
+      return [canonical(source, id, title, location, str(raw.jobUrl) || str(raw.applyUrl) || `https://jobs.ashbyhq.com/${source.slug}`, raw.publishedAt)];
+    });
+  }
+
+  if (source.ats === "Greenhouse") {
+    const data = await json<{ jobs?: Raw[] }>(`https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`);
+    return (data.jobs ?? []).flatMap(raw => {
+      const title = str(raw.title), location = str((raw.location as Raw | undefined)?.name);
+      if (!keep(title, location)) return [];
+      const id = str(raw.id) || str(raw.absolute_url) || title;
+      return [canonical(source, id, title, location, str(raw.absolute_url) || `https://job-boards.greenhouse.io/${source.slug}`, raw.first_published ?? raw.updated_at)];
+    });
+  }
+
+  if (source.ats === "Lever") {
+    const data = await json<Raw[]>(`https://api.lever.co/v0/postings/${slug}?mode=json`);
+    return data.flatMap(raw => {
+      const title = str(raw.text), categories = raw.categories as Raw | undefined;
+      const location = [str(categories?.location), ...((raw.categories as Raw | undefined)?.allLocations as string[] | undefined ?? [])].filter(Boolean).filter((value, index, all) => all.indexOf(value) === index).join("; ") || (raw.workplaceType === "remote" ? "Remote" : "");
+      if (!keep(title, location)) return [];
+      const id = str(raw.id) || str(raw.hostedUrl) || title;
+      return [canonical(source, id, title, location, str(raw.hostedUrl) || str(raw.applyUrl) || `https://jobs.lever.co/${source.slug}`, raw.createdAt)];
+    });
+  }
+
+  if (source.ats === "SmartRecruiters") {
+    const data = await json<{ content?: Raw[] }>(`https://api.smartrecruiters.com/v1/companies/${slug}/postings?limit=100`);
+    return (data.content ?? []).flatMap(raw => {
+      const title = str(raw.name), loc = raw.location as Raw | undefined;
+      const location = joinParts(loc?.city, loc?.region, loc?.country === "us" ? "United States" : loc?.country) || (loc?.remote ? "Remote" : "");
+      if (!keep(title, location)) return [];
+      const id = str(raw.id) || title;
+      return [canonical(source, id, title, location, `https://jobs.smartrecruiters.com/${source.slug}/${id}`, raw.releasedDate)];
+    });
+  }
+
+  if (source.ats === "Workable") {
+    const data = await json<{ jobs?: Raw[] }>(`https://apply.workable.com/api/v1/widget/accounts/${slug}`);
+    return (data.jobs ?? []).flatMap(raw => {
+      const title = str(raw.title), locations = raw.locations as Raw[] | undefined;
+      const location = (locations ?? []).map(loc => joinParts(loc.city, loc.region, loc.countryCode === "US" ? "United States" : loc.country ?? loc.countryCode)).filter(Boolean).join("; ") || joinParts(raw.city, raw.state, raw.country) || (raw.remote ? "Remote" : "");
+      if (!keep(title, location)) return [];
+      const id = str(raw.shortcode) || str(raw.code) || title;
+      return [canonical(source, id, title, location, str(raw.url) || `https://apply.workable.com/${source.slug}/j/${id}`, raw.published_on ?? raw.published)];
+    });
+  }
+
+  if (source.ats === "Recruitee") {
+    const data = await json<{ offers?: Raw[] }>(`https://${slug}.recruitee.com/api/offers/`);
+    return (data.offers ?? []).flatMap(raw => {
+      const title = str(raw.title), country = raw.country_code === "US" ? "United States" : str(raw.country_code);
+      const location = joinParts(raw.city, raw.state_code, country) || (raw.remote ? "Remote" : "");
+      if (!keep(title, location)) return [];
+      const id = str(raw.id) || str(raw.slug) || title;
+      return [canonical({ ...source, companyName: str(raw.company_name) || source.companyName }, id, title, location, str(raw.careers_url) || `https://${source.slug}.recruitee.com/o/${str(raw.slug)}`, raw.published_at)];
+    });
+  }
+
+  if (source.ats === "Breezy") {
+    const data = await json<Raw[]>(`https://${slug}.breezy.hr/json`);
+    return data.flatMap(raw => {
+      const title = str(raw.name), loc = raw.location as Raw | undefined;
+      const location = str(loc?.name) || joinParts(loc?.city, (loc?.state as Raw | undefined)?.name, (loc?.country as Raw | undefined)?.name) || (loc?.is_remote ? "Remote" : "");
+      if (!keep(title, location)) return [];
+      const id = str(raw.id) || str(raw.friendly_id) || title;
+      return [canonical(source, id, title, location, str(raw.url) || `https://${source.slug}.breezy.hr/p/${str(raw.friendly_id) || id}`, raw.published_date)];
+    });
+  }
+
+  if (source.ats === "Pinpoint") {
+    const data = await json<{ data?: Raw[] }>(`https://${slug}.pinpointhq.com/postings.json`);
+    return (data.data ?? []).flatMap(raw => {
+      const title = str(raw.title) || str(raw.name), loc = raw.location as Raw | undefined;
+      const location = str(loc?.name) || joinParts(loc?.city, loc?.province, loc?.country) || (raw.workplace_type === "remote" ? "Remote" : "");
+      if (!keep(title, location)) return [];
+      const rawUrl = str(raw.url) || str(raw.absolute_url), id = str(raw.id) || str(raw.uuid) || title;
+      return [canonical(source, id, title, location, rawUrl || `https://${source.slug}.pinpointhq.com/postings/${id}`, raw.published_at ?? raw.created_at)];
+    });
+  }
+
+  if (source.ats === "Rippling") {
+    const data = await json<{ items?: Raw[] } | Raw[]>(`https://api.rippling.com/platform/api/ats/v1/board/${slug}/jobs`);
+    const items = Array.isArray(data) ? data : data.items ?? [];
+    return items.flatMap(raw => {
+      const title = str(raw.name) || str(raw.title);
+      const locations = raw.locations as Raw[] | undefined;
+      const location = (locations ?? []).map(loc => str(loc.name) || joinParts(loc.city, loc.state, loc.country)).filter(Boolean).join("; ") || str((raw.workLocation as Raw | undefined)?.label) || str(raw.location) || (raw.isRemote ? "Remote" : "");
+      if (!keep(title, location)) return [];
+      const id = str(raw.id) || str(raw.uuid) || title;
+      return [canonical(source, id, title, location, str(raw.url) || str(raw.jobUrl) || `https://ats.rippling.com/${source.slug}/jobs/${id}`, raw.createdAt ?? raw.publishedAt)];
+    });
+  }
+
+  throw new Error(`${source.ats} boards are not supported`);
+}
