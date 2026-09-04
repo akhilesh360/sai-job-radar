@@ -21,8 +21,8 @@ export function employerKey(normalized: string): string {
 
 const filler = new Set(["inc", "llc", "corp", "co", "company", "group", "holdings", "holding", "technologies", "technology", "tech", "labs", "lab", "software", "systems", "solutions", "services", "service", "america", "americas", "north", "us", "usa", "u", "s", "international", "global", "opco", "operations", "capital", "management", "business", "com", "io", "health", "healthcare", "financial", "finance", "partners", "ventures", "enterprises", "industries", "digital", "data", "consulting", "networks", "network", "payments", "bank", "national", "association", "n", "a", "trust", "insurance", "media", "labs", "research", "energy", "motor", "motors", "foods", "stores", "worldwide", "platforms", "products", "web", "cloud", "online", "mobile"]);
 
-export type SponsorRow = { nameNorm: string; name: string; approvals: number; fiscalYear: number; state: string | null };
-export type SponsorMatch = { name: string; approvals: number; fiscalYear: number; exact: boolean };
+export type SponsorRow = { nameNorm: string; name: string; approvals: number; fiscalYear: number; state: string | null; lcaLatestFy?: number | null };
+export type SponsorMatch = { name: string; approvals: number; fiscalYear: number; exact: boolean; lcaLatestFy: number | null };
 
 /**
  * Pick the sponsor that a job's company name refers to, from the rows sharing its first token.
@@ -54,5 +54,6 @@ export function matchSponsor(company: string, candidates: SponsorRow[]): Sponsor
     }
   }
   const best = hits.reduce((a, b) => (b.approvals > a.approvals ? b : a));
-  return { name: best.name, approvals: hits.reduce((sum, c) => sum + c.approvals, 0), fiscalYear: Math.max(...hits.map(c => c.fiscalYear)), exact: hits.some(c => c.nameNorm === norm) };
+  const lcaYears = hits.map(c => c.lcaLatestFy ?? 0).filter(Boolean);
+  return { name: best.name, approvals: hits.reduce((sum, c) => sum + c.approvals, 0), fiscalYear: Math.max(...hits.map(c => c.fiscalYear)), exact: hits.some(c => c.nameNorm === norm), lcaLatestFy: lcaYears.length ? Math.max(...lcaYears) : null };
 }

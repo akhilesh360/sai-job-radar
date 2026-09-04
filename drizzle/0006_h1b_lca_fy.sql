@@ -1,0 +1,1 @@
+ALTER TABLE `h1b_sponsors` ADD `lca_latest_fy` integer;

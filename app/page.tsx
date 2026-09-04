@@ -7,7 +7,7 @@ type Status = "New" | "Saved" | "Applied" | "Interview" | "Rejected" | "Archived
 type Job = {
   id: string; title: string; company: string; location: string; workplace: "Remote" | "Hybrid" | "Onsite" | "Unknown";
   source: string; salary: string | null; postedAt: string | null; discoveredAt: string; lastSeenAt: string; applyUrl: string; status: Status;
-  h1b: { name: string; approvals: number; fiscalYear: number; exact: boolean } | null;
+  h1b: { name: string; approvals: number; fiscalYear: number; exact: boolean; lcaLatestFy: number | null } | null;
 };
 type SourceStats = {
   total: number; active: number; pending: number; invalid: number; errored: number; seedCatalogSize: number; catalogOffset: number;
@@ -302,7 +302,7 @@ export default function Home() {
               {filtered.map(job => {
                 const isNew = now - new Date(job.discoveredAt).getTime() < 86400000;
                 return <tr key={job.id}>
-                  <td><div className="role-cell"><span className="company-avatar">{job.company.slice(0, 2).toUpperCase()}</span><div><strong>{job.title}</strong><span>{job.company} · {classifyRole(job.title) ?? "Engineering"} · {seniority(job.title)}{job.salary && <> · <b className="salary">{job.salary}</b></>}{job.h1b && <em className="h1b" title={`${job.h1b.name} — ${job.h1b.approvals.toLocaleString()} H-1B approvals (FY${job.h1b.fiscalYear}, USCIS Employer Data Hub${job.h1b.exact ? "" : "; matched by name prefix"})`}>H-1B ✓ {job.h1b.approvals.toLocaleString()}</em>}{isNew && <em>NEW</em>}{job.source.includes("(Google)") && <em className="unverified">UNVERIFIED</em>}</span></div></div></td>
+                  <td><div className="role-cell"><span className="company-avatar">{job.company.slice(0, 2).toUpperCase()}</span><div><strong>{job.title}</strong><span>{job.company} · {classifyRole(job.title) ?? "Engineering"} · {seniority(job.title)}{job.salary && <> · <b className="salary">{job.salary}</b></>}{job.h1b && <em className="h1b" title={`${job.h1b.name}${job.h1b.approvals ? ` — ${job.h1b.approvals.toLocaleString()} H-1B approvals (FY${job.h1b.fiscalYear}, USCIS Employer Data Hub)` : ""}${job.h1b.lcaLatestFy ? ` — certified H-1B LCAs in FY${job.h1b.lcaLatestFy} (DOL disclosure data)` : ""}${job.h1b.exact ? "" : " — matched by name prefix"}`}>H-1B ✓{job.h1b.approvals ? ` ${job.h1b.approvals.toLocaleString()}` : ""}{job.h1b.lcaLatestFy ? ` · FY${job.h1b.lcaLatestFy}` : ""}</em>}{isNew && <em>NEW</em>}{job.source.includes("(Google)") && <em className="unverified">UNVERIFIED</em>}</span></div></div></td>
                   <td><strong className="plain-strong">{job.location}</strong><span className={`workplace ${job.workplace.toLowerCase()}`}>{job.workplace}</span></td>
                   <td><span className="source-pill">{job.source}</span></td>
                   <td><strong className="time-main">{job.postedAt ? `Posted ${relativeTime(job.postedAt)}` : "Post date unknown"}</strong><span className="time-sub">Found {relativeTime(job.discoveredAt)} · Seen {relativeTime(job.lastSeenAt)}</span></td>

@@ -115,3 +115,12 @@ refresh) the table after the migrations have run:
 node scripts/load-h1b-sponsors.mjs 2023 2022          # newest fiscal years available on uscis.gov
 npx wrangler d1 execute sai-job-radar --remote --file data/h1b-sponsors.sql -y
 ```
+
+USCIS publishes with a two-year lag. For the current year, download the LCA disclosure file from
+https://www.dol.gov/agencies/eta/foreign-labor/performance in a browser (the site refuses non-browser clients), export
+the distinct employers (a markdown table or CSV with an Employer column), then:
+
+```bash
+node scripts/load-lca-employers.mjs path/to/employers.md 2025
+npx wrangler d1 execute sai-job-radar --remote --file data/h1b-lca-2025.sql -y
+```

@@ -139,4 +139,6 @@ export const h1bSponsors = sqliteTable("h1b_sponsors", {
   fiscalYear: integer("fiscal_year").notNull(),
   approvals: integer("approvals").notNull(),
   state: text("state"),
+  /** Latest fiscal year with a certified H-1B LCA (DOL disclosure data), when known. */
+  lcaLatestFy: integer("lca_latest_fy"),
 }, (table) => [index("h1b_sponsors_key1_idx").on(table.key1)]);
