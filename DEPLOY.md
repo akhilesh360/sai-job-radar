@@ -1,5 +1,16 @@
 # Deploying Sai Job Radar to your own Cloudflare account
 
+## Fastest path: one script
+
+```bash
+bash deploy.sh
+```
+
+It installs dependencies, logs you in to Cloudflare (browser window), creates the free D1 database,
+creates the tables, builds, deploys, and tells you how to add the Serper key. Re-running it is safe.
+The manual steps below are the same thing spelled out.
+
+
 Everything runs on Cloudflare's free tier: Workers (the app + the 15-minute cron), D1 (the database),
 and Workers secrets (your Serper key). One-time setup is about 20 minutes; after that a redeploy is
 `npm run build && npx wrangler deploy --config <generated config>`.
