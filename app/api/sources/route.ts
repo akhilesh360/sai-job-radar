@@ -1,22 +1,33 @@
-import { eq } from "drizzle-orm";
-import { env } from "cloudflare:workers";
+import { eq, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { sourceBoards, systemState } from "../../../db/schema";
-import { defaultSources } from "../../../lib/default-sources";
+import { sourceBoards } from "../../../db/schema";
+import { ensureDefaultSources, getState } from "../../../lib/pipeline";
 import { getCatalogOffset, importSourceSeedBatch, sourceSeedCount } from "../../../lib/source-catalog";
 
-async function ensureDefaults(){const db=getDb();for(let index=0;index<defaultSources.length;index+=7)await db.insert(sourceBoards).values(defaultSources.slice(index,index+7)).onConflictDoNothing()}
-
-export async function GET(){
-  await ensureDefaults();const db=getDb(),rows=await db.select({ats:sourceBoards.ats,status:sourceBoards.status,active:sourceBoards.active}).from(sourceBoards);const byAts:Record<string,number>={},catalogOffset=await getCatalogOffset();
-  const hourlyState=await db.select({value:systemState.value}).from(systemState).where(eq(systemState.key,"last_hourly_run_at")).limit(1);
-  const lastHourlyAt=hourlyState[0]?.value??null,hourlyActive=Boolean(lastHourlyAt&&Date.now()-new Date(lastHourlyAt).getTime()<2.5*60*60*1000);
-  const bindings=env as unknown as {SERPER_API_KEY?:string;RESEND_API_KEY?:string;JOB_ALERT_EMAIL?:string};
-  for(const row of rows)byAts[row.ats]=(byAts[row.ats]??0)+1;
-  return Response.json({total:rows.length,active:rows.filter(row=>row.active).length,pending:rows.filter(row=>row.status==="pending").length,invalid:rows.filter(row=>row.status==="invalid").length,byAts,seedCatalogSize:sourceSeedCount,catalogOffset,catalogComplete:catalogOffset>=sourceSeedCount,discoveryConfigured:Boolean(bindings.SERPER_API_KEY),emailConfigured:Boolean(bindings.RESEND_API_KEY&&bindings.JOB_ALERT_EMAIL),hourlyActive,lastHourlyAt});
+export async function GET() {
+  const db = getDb();
+  await ensureDefaultSources(db);
+  const rows = await db.select({ ats: sourceBoards.ats, status: sourceBoards.status, active: sourceBoards.active, count: sql<number>`count(*)` }).from(sourceBoards).groupBy(sourceBoards.ats, sourceBoards.status, sourceBoards.active);
+  const byAts: Record<string, number> = {};
+  let total = 0, active = 0, pending = 0, invalid = 0, errored = 0;
+  for (const row of rows) {
+    const count = Number(row.count);
+    total += count; byAts[row.ats] = (byAts[row.ats] ?? 0) + count;
+    if (row.active) active += count;
+    if (row.status === "pending") pending += count;
+    if (row.status === "invalid") invalid += count;
+    if (row.status === "error") errored += count;
+  }
+  const catalogOffset = await getCatalogOffset();
+  const [lastFullScanAt, lastScheduledRunAt] = await Promise.all([getState(db, "last_full_scan_at"), getState(db, "last_scheduled_run_at")]);
+  const oldest = await db.select({ at: sql<string | null>`min(${sourceBoards.lastScannedAt})` }).from(sourceBoards).where(eq(sourceBoards.active, true));
+  return Response.json({ total, active, pending, invalid, errored, byAts, seedCatalogSize: sourceSeedCount, catalogOffset, catalogComplete: catalogOffset >= sourceSeedCount, lastFullScanAt, lastScheduledRunAt, oldestScanAt: oldest[0]?.at ?? null });
 }
 
-export async function POST(request:Request){
-  await ensureDefaults();const body=await request.json().catch(()=>({})) as {offset?:number;limit?:number};const offset=body.offset??await getCatalogOffset();
-  return Response.json(await importSourceSeedBatch(offset,body.limit??250));
+/** Stage the next batch of catalog boards as pending sources. */
+export async function POST(request: Request) {
+  await ensureDefaultSources(getDb());
+  const body = await request.json().catch(() => ({})) as { offset?: number; limit?: number };
+  const offset = body.offset ?? await getCatalogOffset();
+  return Response.json(await importSourceSeedBatch(offset, body.limit ?? 250));
 }

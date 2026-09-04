@@ -1,94 +1,232 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { classifyRole, roleOptions } from "../lib/job-discovery";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { classifyRole, roleFamilies, seniority } from "../lib/roles";
 
-type Status = "New" | "Saved" | "Applied" | "Interview" | "Rejected" | "Archived";
-type View = "ats" | "brave" | "audit";
-type Job = { id:string; title:string; company:string; location:string; workplace:"Remote"|"Hybrid"|"Onsite"|"Unknown"; source:string; postedAt:string|null; discoveredAt:string; applyUrl:string; status:Status; addedFromBrave:boolean; isNew:boolean };
-type SourceStats = { total:number; active:number; pending:number; invalid:number; seedCatalogSize:number; catalogOffset:number; catalogComplete:boolean; discoveryConfigured:boolean; emailConfigured:boolean; hourlyActive:boolean; lastHourlyAt:string|null };
-type BraveResult = { id:number; ats:string; domain:string; queryGroup:string; title:string; company:string|null; location:string|null; resultUrl:string; snippet:string|null; postedAt:string|null; discoveredAt:string; lastSeenAt:string; reviewStatus:string; isDuplicate:boolean; isNewCompany:boolean; isTargetRole:boolean; usLocationStatus:string };
-type BraveMetrics = { status:string; runId:number; startedAt:string; finishedAt:string|null; requestsAttempted:number; failed:number; rawResults:number; candidateResults:number; validationRemaining:number; excludedResults:number; uniqueResults:number; targetRoleResults:number; confirmedUsResults:number; duplicates:number; newCompanies:number; unsupportedAtsResults:number; unsupportedBreakdown:Array<{ats:string;count:number}> };
-type BravePayload = { hasRun:boolean; metrics:BraveMetrics|null; results:BraveResult[] };
-type GoogleUsage = { month:string; queries:number; limit:number };
-type AuditResult = { id:number;auditRunId:number;ats:string;domain:string;queryGroup:string;title:string;company:string|null;location:string|null;resultUrl:string;snippet:string|null;searchIndexedAt:string|null;postedAt:string|null;discoveredAt:string;verificationStatus:string;matchedJobId:string|null;isDuplicate:boolean;isNewCompany:boolean };
-type AuditPayload = { hasRun:boolean; run:{id:number;window:string;freshness:string;startedAt:string;finishedAt:string|null;status:string;queries:number;results:number;failed:number}|null; results:AuditResult[] };
+type Status = "New" | "Saved" | "Applied" | "Interview" | "Rejected" | "Archived" | "Closed";
+type Job = {
+  id: string; title: string; company: string; location: string; workplace: "Remote" | "Hybrid" | "Onsite" | "Unknown";
+  source: string; postedAt: string | null; discoveredAt: string; lastSeenAt: string; applyUrl: string; status: Status;
+};
+type SourceStats = {
+  total: number; active: number; pending: number; invalid: number; errored: number; seedCatalogSize: number; catalogOffset: number;
+  catalogComplete: boolean; lastFullScanAt: string | null; lastScheduledRunAt: string | null; oldestScanAt: string | null;
+};
 
-const auditProviders = [
-  { ats:"Ashby", domain:"jobs.ashbyhq.com" },
-  { ats:"Greenhouse", domain:"job-boards.greenhouse.io" },
-  { ats:"Lever", domain:"jobs.lever.co" },
-] as const;
-const auditQueryGroups = [
-  { key:"data_analytics", label:"Data + Analytics", query:'"data" OR "analytics"' },
-  { key:"ai_engineering", label:"AI + Engineering", query:'"AI" OR "machine learning" OR "ML" OR "GTM" OR "forward deployed" OR "product engineer" OR "cloud engineer" OR "AWS engineer" OR "GCP engineer"' },
-] as const;
+const statuses: Status[] = ["New", "Saved", "Applied", "Interview", "Rejected", "Archived", "Closed"];
+const closedStatuses: Status[] = ["Archived", "Rejected", "Closed"];
+const recencyHours: Record<string, number> = { "24 hours": 24, "3 days": 72, "7 days": 168, "14 days": 336, "30 days": 720 };
 
-const initialJobs: Job[] = [
-  { id:"seed-1",title:"Data Engineer",company:"OpenAI",location:"San Francisco, CA",workplace:"Hybrid",source:"Ashby",postedAt:"2026-08-22T22:18:00Z",discoveredAt:"2026-08-22T23:03:00Z",applyUrl:"https://jobs.ashbyhq.com/openai",status:"New",addedFromBrave:false,isNew:true },
-  { id:"seed-2",title:"Analytics Data Engineer",company:"Anthropic",location:"New York, NY",workplace:"Hybrid",source:"Greenhouse",postedAt:"2026-08-22T19:40:00Z",discoveredAt:"2026-08-22T20:06:00Z",applyUrl:"https://job-boards.greenhouse.io/anthropic",status:"New",addedFromBrave:false,isNew:true },
-];
-const statuses: Status[] = ["New","Saved","Applied","Interview","Rejected","Archived"];
+function relativeTime(iso: string) {
+  const diff = Math.max(0, Date.now() - new Date(iso).getTime());
+  const hours = Math.floor(diff / 3600000);
+  if (hours < 1) return `${Math.max(1, Math.floor(diff / 60000))}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
 
-function relativeTime(iso:string){const diff=Math.max(0,Date.now()-new Date(iso).getTime());const h=Math.floor(diff/3600000);if(h<1)return `${Math.max(1,Math.floor(diff/60000))}m ago`;if(h<24)return `${h}h ago`;return `${Math.floor(h/24)}d ago`}
-function braveAge(item:BraveResult,now:number){return item.postedAt?(now-new Date(item.postedAt).getTime())/3600000:Number.POSITIVE_INFINITY}
-function Icon({name}:{name:"radar"|"search"|"refresh"|"mail"|"external"}){const paths={radar:<><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 4v8l5 3"/></>,search:<><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,refresh:<><path d="M20 6v5h-5"/><path d="M4 18v-5h5"/><path d="M18.5 9a7 7 0 0 0-12-2L4 11M5.5 15a7 7 0 0 0 12 2l2.5-4"/></>,mail:<><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></>,external:<><path d="M14 4h6v6"/><path d="m10 14 10-10"/><path d="M20 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5"/></>};return <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>}
+function Icon({ name }: { name: "radar" | "search" | "refresh" | "mail" | "external" | "stop" }) {
+  const paths = {
+    radar: <><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3" /><path d="M12 4v8l5 3" /></>,
+    search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></>,
+    refresh: <><path d="M20 6v5h-5" /><path d="M4 18v-5h5" /><path d="M18.5 9a7 7 0 0 0-12-2L4 11M5.5 15a7 7 0 0 0 12 2l2.5-4" /></>,
+    mail: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></>,
+    external: <><path d="M14 4h6v6" /><path d="m10 14 10-10" /><path d="M20 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5" /></>,
+    stop: <rect x="6" y="6" width="12" height="12" rx="2" />,
+  };
+  return <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
+}
 
-export default function Home(){
-  const [view,setView]=useState<View>("ats");
-  const [jobs,setJobs]=useState(initialJobs);const [query,setQuery]=useState("");const [discovery,setDiscovery]=useState("All discovery");const [role,setRole]=useState("All roles");const [source,setSource]=useState("All sources");const [recency,setRecency]=useState("7 days");const [workplace,setWorkplace]=useState("All locations");const [sort,setSort]=useState("Newest first");
-  const [lastRefresh,setLastRefresh]=useState<Date|null>(null);const [loading,setLoading]=useState(false);const [notice,setNotice]=useState("");const [now,setNow]=useState(()=>Date.now());const [sourceStats,setSourceStats]=useState<SourceStats|null>(null);
-  const [braveResults,setBraveResults]=useState<BraveResult[]>([]);const [braveMetrics,setBraveMetrics]=useState<BraveMetrics|null>(null);const [googleUsage,setGoogleUsage]=useState<GoogleUsage|null>(null);const [braveLoading,setBraveLoading]=useState(false);const [braveRecency,setBraveRecency]=useState("7 days");const [showBraveDuplicates,setShowBraveDuplicates]=useState(false);const [braveSort,setBraveSort]=useState("Newest first");const [promotingId,setPromotingId]=useState<number|null>(null);const [dismissingId,setDismissingId]=useState<number|null>(null);
-  const [auditResults,setAuditResults]=useState<AuditResult[]>([]);const [auditRun,setAuditRun]=useState<AuditPayload["run"]>(null);const [auditRecency,setAuditRecency]=useState("7 days");const [auditLoading,setAuditLoading]=useState(false);
+async function post<T>(url: string, body?: unknown): Promise<T> {
+  const response = await fetch(url, { method: "POST", headers: body ? { "content-type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
+  const result = await response.json() as T & { error?: string };
+  if (!response.ok) throw new Error(result.error ?? `${url} failed (${response.status})`);
+  return result;
+}
 
-  const loadJobs=async()=>{setLoading(true);try{const response=await fetch("/api/jobs",{cache:"no-store"});if(response.ok){const data=await response.json() as {jobs:Array<Omit<Job,"isNew">>};const refreshedAt=Date.now();setNow(refreshedAt);setJobs(data.jobs.map(j=>({...j,isNew:(refreshedAt-new Date(j.discoveredAt).getTime())<86400000})));setLastRefresh(new Date(refreshedAt))}}finally{setLoading(false)}};
-  const loadSourceStats=async()=>{const response=await fetch("/api/sources",{cache:"no-store"});if(response.ok)setSourceStats(await response.json() as SourceStats)};
-  const loadBraveResults=async()=>{const response=await fetch("/api/internal/google-discovery",{cache:"no-store"});if(!response.ok)return null;const data=await response.json() as BravePayload&{usage?:GoogleUsage};setBraveMetrics(data.metrics);setBraveResults(data.results);setGoogleUsage(data.usage??null);return data};
-  const loadAudit=async(window=auditRecency)=>{const response=await fetch(`/api/internal/coverage-audit?window=${encodeURIComponent(window)}`,{cache:"no-store"});if(!response.ok)return null;const data=await response.json() as AuditPayload;setAuditRun(data.run);setAuditResults(data.results);return data};
+export default function Home() {
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [sourceStats, setSourceStats] = useState<SourceStats | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [notice, setNotice] = useState("");
+  const stopRequested = useRef(false);
 
-  const runIngest=async()=>{setLoading(true);setNotice("Running ATS source checks and collection…");try{const post=async<T,>(url:string,body?:unknown)=>{const response=await fetch(url,{method:"POST",headers:body?{"content-type":"application/json"}:undefined,body:body?JSON.stringify(body):undefined});const result=await response.json() as T;if(!response.ok&&response.status!==503)throw new Error(`${url} failed`);return {response,result}};await post("/api/sources",{limit:250});const first=await post<{checked?:number}>("/api/internal/validate-sources",{limit:40});const second=await post<{checked?:number}>("/api/internal/validate-sources",{limit:40});const {result:collection}=await post<{inserted?:number;updated?:number;failed?:number;sourcesScanned?:number}>("/api/internal/ingest");await post("/api/internal/digest");const checked=(first.result.checked??0)+(second.result.checked??0);setNotice(`ATS scan finished: ${collection.inserted??0} new, ${collection.updated??0} refreshed across ${collection.sourcesScanned??0} boards; ${checked} sources validated${collection.failed?`, ${collection.failed} unavailable`:""}.`);await Promise.all([loadJobs(),loadSourceStats()])}catch{setNotice("ATS scan stopped early. Please try again; if it repeats, the error will be checked.")}finally{setLoading(false)}};
-  const runBraveTest=async()=>{setBraveLoading(true);setNotice("Running 84 exact-phrase role-family searches across 12 supported ATS domains…");try{let runId:number|undefined,cursor=0,done=false;for(let batch=0;!done&&batch<12;batch++){const response=await fetch("/api/internal/google-discovery",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({runId,cursor,freshness:"day"})});const result=await response.json() as {configured?:boolean;paused?:boolean;runId?:number;cursor?:number;done?:boolean;requestsPlanned?:number;monthlyQueries?:number;message?:string};if(!response.ok||!result.configured)throw new Error(result.message??"Google discovery failed");runId=result.runId;cursor=result.cursor??cursor;done=Boolean(result.done);setNotice(`Google discovery: ${cursor}/${result.requestsPlanned??84} role-family searches complete…`)}if(!runId||!done)throw new Error("Google discovery did not finish");const current=await loadBraveResults();let remaining=Math.max(current?.metrics?.validationRemaining??0,1),processed=0;for(let batch=0;remaining>0&&batch<120;batch++){setNotice(`Validating Google candidates against authoritative ATS boards… ${processed} checked`);const validationResponse=await fetch("/api/internal/brave-validate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({runId})});if(!validationResponse.ok)throw new Error("Validation failed");const validation=await validationResponse.json() as {done:boolean;remaining:number;processed:number};processed+=validation.processed;remaining=validation.remaining;if(validation.done)break}const completed=await loadBraveResults();if(remaining>0)throw new Error("Validation did not finish");setNotice(`Google cycle finished: ${completed?.metrics?.uniqueResults??0} verified US target-role jobs shown; ${completed?.metrics?.excludedResults??0} invalid, foreign, expired, or irrelevant results excluded.`)}catch{setNotice("Google discovery or ATS validation stopped early. Your ATS Feed was not changed; run it again to retry safely.")}finally{setBraveLoading(false)}};
-  const runAudit=async()=>{setAuditLoading(true);setNotice(`Running six fresh ${auditRecency} coverage searches…`);try{const response=await fetch("/api/internal/coverage-audit",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({window:auditRecency})});const result=await response.json() as {configured?:boolean;runId?:number;candidates?:number;message?:string};if(!response.ok||!result.configured||!result.runId)throw new Error(result.message??"Audit search failed");let remaining=Math.max(result.candidates??0,1),processed=0;for(let batch=0;remaining>0&&batch<80;batch++){setNotice(`Validating audit candidates against ATS boards… ${processed} checked`);const validationResponse=await fetch("/api/internal/coverage-audit-validate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({runId:result.runId})});if(!validationResponse.ok)throw new Error("Audit validation failed");const validation=await validationResponse.json() as {done:boolean;remaining:number;processed:number};processed+=validation.processed;remaining=validation.remaining;if(validation.done)break}const completed=await loadAudit(auditRecency);if(remaining>0)throw new Error("Audit validation did not finish");const valid=completed?.results.filter(item=>item.verificationStatus==="verified").length??0;setNotice(`Coverage audit finished: ${completed?.results.length??0} fresh search candidates, ${valid} active US target-role jobs validated.`)}catch{setNotice("Coverage audit stopped early. V1.2.2 and the ATS Feed were not changed; please try again.")}finally{setAuditLoading(false)}};
-  const sendDigest=async()=>{setNotice("Preparing digest…");const response=await fetch("/api/internal/digest",{method:"POST"});const result=await response.json() as {message?:string;sent?:number};setNotice(response.ok?`Email digest sent with ${result.sent??0} jobs.`:result.message??"Email digest needs its free email settings.")};
-  const promoteBraveJob=async(id:number)=>{setPromotingId(id);try{const response=await fetch("/api/internal/brave-promote",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id})});const result=await response.json() as {added?:boolean;message?:string};if(!response.ok)throw new Error(result.message??"Promotion failed");setNotice(result.added?"Job added to the ATS Feed with New status.":"This job was already in the ATS Feed.");await Promise.all([loadJobs(),loadBraveResults()])}catch{setNotice("Could not add this job to the ATS Feed. Please try again.")}finally{setPromotingId(null)}};
-  const dismissBraveJob=async(id:number)=>{setDismissingId(id);try{const response=await fetch("/api/internal/google-review",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id,action:"dismiss"})});if(!response.ok)throw new Error("Dismiss failed");setNotice("Job dismissed. It will stay hidden in future Google scans.");await loadBraveResults()}catch{setNotice("Could not dismiss this job. Please try again.")}finally{setDismissingId(null)}};
-  const expandCoverage=async()=>{setLoading(true);setNotice("Loading and validating your ATS source lists…");try{let offset=sourceStats?.catalogOffset??0,complete=sourceStats?.catalogComplete??false;while(!complete){const response=await fetch("/api/sources",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({offset,limit:250})});const result=await response.json() as {nextOffset:number;complete:boolean};offset=result.nextOffset;complete=result.complete}const validation=await fetch("/api/internal/validate-sources",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({limit:25})});const result=await validation.json() as {checked:number;active:number;invalid:number};await loadSourceStats();setNotice(`All ${sourceStats?.seedCatalogSize??offset} catalog boards are staged. Checked ${result.checked}: ${result.active} active, ${result.invalid} unavailable.`)}finally{setLoading(false)}};
+  const [query, setQuery] = useState("");
+  const [role, setRole] = useState("All roles");
+  const [recency, setRecency] = useState("30 days");
+  const [source, setSource] = useState("All sources");
+  const [workplace, setWorkplace] = useState("All locations");
+  const [statusFilter, setStatusFilter] = useState("Open");
+  const [sort, setSort] = useState("Newest first");
 
-  useEffect(()=>{void Promise.all([fetch("/api/jobs",{cache:"no-store"}),fetch("/api/sources",{cache:"no-store"}),fetch("/api/internal/google-discovery",{cache:"no-store"}),fetch("/api/internal/coverage-audit?window=7%20days",{cache:"no-store"})]).then(async([jobsResponse,sourcesResponse,braveResponse,auditResponse])=>{if(jobsResponse.ok){const data=await jobsResponse.json() as {jobs:Array<Omit<Job,"isNew">>};const refreshedAt=Date.now();setNow(refreshedAt);setJobs(data.jobs.map(j=>({...j,isNew:(refreshedAt-new Date(j.discoveredAt).getTime())<86400000})));setLastRefresh(new Date(refreshedAt))}if(sourcesResponse.ok)setSourceStats(await sourcesResponse.json() as SourceStats);if(braveResponse.ok){const data=await braveResponse.json() as BravePayload&{usage?:GoogleUsage};setBraveMetrics(data.metrics);setBraveResults(data.results);setGoogleUsage(data.usage??null)}if(auditResponse.ok){const data=await auditResponse.json() as AuditPayload;setAuditRun(data.run);setAuditResults(data.results)}})},[]);
-  const filtered=useMemo(()=>{const cutoffs:Record<string,number>={"1 hour":1,"24 hours":24,"3 days":72,"7 days":168};return jobs.filter(j=>{const h=`${j.title} ${j.company} ${j.location}`.toLowerCase(),discoveryMatch=discovery==="All discovery"||(discovery==="Added from discovery"?j.addedFromBrave:!j.addedFromBrave),age=(now-new Date(j.postedAt??j.discoveredAt).getTime())/3600000;return h.includes(query.toLowerCase())&&discoveryMatch&&(role==="All roles"||classifyRole(j.title)===role)&&(source==="All sources"||j.source===source)&&(workplace==="All locations"||j.workplace===workplace)&&(recency==="All time"||age<=cutoffs[recency])}).sort((a,b)=>{const av=new Date(a.postedAt??a.discoveredAt).getTime(),bv=new Date(b.postedAt??b.discoveredAt).getTime();return sort==="Newest first"?bv-av:av-bv})},[jobs,query,discovery,role,source,recency,workplace,sort,now]);
-  const filteredBrave=useMemo(()=>{const cutoffs:Record<string,number>={"1 day":24,"3 days":72,"7 days":168};return braveResults.filter(item=>(showBraveDuplicates||!item.isDuplicate)&&(braveRecency==="All time"||braveAge(item,now)<=cutoffs[braveRecency])).sort((a,b)=>{const av=a.postedAt?new Date(a.postedAt).getTime():0,bv=b.postedAt?new Date(b.postedAt).getTime():0;return braveSort==="Newest first"?bv-av:av-bv})},[braveResults,showBraveDuplicates,braveRecency,braveSort,now]);
-  const auditRows=useMemo(()=>auditProviders.flatMap(provider=>auditQueryGroups.map(group=>{const candidates=auditResults.filter(item=>item.domain===provider.domain&&item.queryGroup===group.key),valid=candidates.filter(item=>item.verificationStatus==="verified");return{...provider,...group,queryText:`site:${provider.domain} (${group.query})`,candidates:candidates.length,valid:valid.length,excluded:candidates.filter(item=>item.verificationStatus!=="verified"&&item.verificationStatus!=="search_result").length,duplicates:valid.filter(item=>item.isDuplicate).length,newCompanies:new Set(valid.filter(item=>item.isNewCompany).map(item=>item.company??item.resultUrl)).size}})),[auditResults]);
-  const validatedAuditJobs=useMemo(()=>auditResults.filter(item=>item.verificationStatus==="verified").sort((a,b)=>new Date(b.postedAt??b.discoveredAt).getTime()-new Date(a.postedAt??a.discoveredAt).getTime()),[auditResults]);
-  const updateStatus=async(id:string,status:Status)=>{const before=jobs.find(j=>j.id===id)?.status;setJobs(all=>all.map(j=>j.id===id?{...j,status}:j));const response=await fetch("/api/jobs",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({id,status})});if(!response.ok&&before)setJobs(all=>all.map(j=>j.id===id?{...j,status:before}:j))};
-  const newCount=jobs.filter(j=>j.status==="New").length,todayCount=jobs.filter(j=>now-new Date(j.discoveredAt).getTime()<86400000).length,appliedCount=jobs.filter(j=>j.status==="Applied").length,interviewCount=jobs.filter(j=>j.status==="Interview").length,sourceCount=new Set(jobs.map(j=>j.source)).size;
-  const braveFresh=braveResults.filter(item=>braveAge(item,now)<=168).length,braveOlder=braveResults.length-braveFresh,braveDuplicates=braveResults.filter(item=>item.isDuplicate).length;
-  const auditTotals=auditRows.reduce((sum,row)=>({candidates:sum.candidates+row.candidates,valid:sum.valid+row.valid,excluded:sum.excluded+row.excluded,duplicates:sum.duplicates+row.duplicates,newCompanies:sum.newCompanies+row.newCompanies}),{candidates:0,valid:0,excluded:0,duplicates:0,newCompanies:0});
+  const loadJobs = async () => {
+    const response = await fetch("/api/jobs", { cache: "no-store" });
+    if (!response.ok) return;
+    const data = await response.json() as { jobs: Job[] };
+    setJobs(data.jobs);
+    const at = Date.now();
+    setNow(at);
+    setLastRefresh(new Date(at));
+  };
+  const loadSourceStats = async () => {
+    const response = await fetch("/api/sources", { cache: "no-store" });
+    if (response.ok) setSourceStats(await response.json() as SourceStats);
+  };
 
-  return <main className="app-shell"><header className="topbar"><div className="brand"><span className="brand-mark"><Icon name="radar"/></span><div><strong>Sai Job Radar</strong><span>US technical jobs, one focused feed</span></div></div><div className="top-actions"><span className="live-pill"><i/> {sourceStats?.hourlyActive?"Hourly ATS automation active":"ATS collection ready"}</span>{view==="ats"&&<><button className="secondary-btn" onClick={()=>void sendDigest()}><Icon name="mail"/> {sourceStats?.emailConfigured?"Email digest":"Connect email"}</button><button className="primary-btn" onClick={()=>void runIngest()} disabled={loading}><Icon name="refresh"/> {loading?"Scanning…":"Run ATS scan"}</button></>}{view==="brave"&&<button className="brave-btn" onClick={()=>void runBraveTest()} disabled={braveLoading}><Icon name="search"/> {braveLoading?"Searching + validating…":"Run Google Scan"}</button>}{view==="audit"&&<span className="audit-readonly">HISTORICAL AUDIT</span>}</div></header>
-  <section className="workspace"><div className="page-heading"><div><p className="eyebrow">30-DAY JOB SEARCH</p><h1>Your job command center</h1><p>{view==="ats"?"Verified ATS jobs with application tracking.":view==="brave"?"Google-indexed job discovery with authoritative ATS validation.":"Historical Phase 1 coverage evidence."}</p></div><div className="sync-copy"><span>{view==="ats"?"Last refreshed":view==="brave"?"Latest Google run":"Audit baseline"}</span><strong>{view==="ats"?(lastRefresh?lastRefresh.toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}):"Loading database…"):(auditRun?.finishedAt?relativeTime(auditRun.finishedAt):braveMetrics?.finishedAt?relativeTime(braveMetrics.finishedAt):"Not run yet")}</strong><small>{view==="ats"?"ATS collection only":view==="brave"?"84 role-family × supported ATS searches • Past day":"Ashby • Greenhouse • Lever"}</small></div></div>
-  <div className="view-tabs" role="tablist" aria-label="Job discovery views"><button className={view==="ats"?"active":""} onClick={()=>setView("ats")} role="tab" aria-selected={view==="ats"}>ATS Feed <span>{jobs.length}</span></button><button className={view==="brave"?"active":""} onClick={()=>setView("brave")} role="tab" aria-selected={view==="brave"}>Google Discovery <span>{braveResults.length}</span></button><button className={view==="audit"?"active":""} onClick={()=>{setView("audit");void loadAudit()}} role="tab" aria-selected={view==="audit"}>Historical Audit <span>3 ATS</span></button></div>
-  {notice&&<div className="notice" role="status">{notice}<button onClick={()=>setNotice("")} aria-label="Dismiss notification">×</button></div>}
+  useEffect(() => { void Promise.all([loadJobs(), loadSourceStats()]); }, []);
 
-  {view==="ats"?<>
-    <div className="stats-grid"><article><span>NEW JOBS</span><strong>{newCount}</strong><small>Ready to review</small></article><article><span>DISCOVERED TODAY</span><strong>{todayCount}</strong><small>Across {sourceCount} active ATS feeds</small></article><article><span>APPLICATIONS</span><strong>{appliedCount}</strong><small>Statuses saved automatically</small></article><article><span>INTERVIEWS</span><strong>{interviewCount}</strong><small>Keep the pipeline moving</small></article></div>
-    <section className="panel"><div className="panel-top"><div><h2>ATS job feed</h2><p>{filtered.length} jobs match your current view</p></div><div className="source-health"><span><i className="healthy"/> {sourceStats?`${sourceStats.active} active • ${sourceStats.pending} waiting • ${sourceStats.catalogOffset.toLocaleString()}/${sourceStats.seedCatalogSize.toLocaleString()} staged`:"Loading sources…"}</span><button onClick={()=>void expandCoverage()} disabled={loading||sourceStats?.catalogComplete}>{sourceStats?.catalogComplete?"Catalog loaded":"Expand coverage"}</button></div></div>
-    <div className="filters"><label className="search-box"><Icon name="search"/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search title, company, or location" aria-label="Search jobs"/></label><select value={discovery} onChange={e=>setDiscovery(e.target.value)} aria-label="Filter by discovery method"><option>All discovery</option><option>Added from discovery</option><option>ATS scan only</option></select><select value={role} onChange={e=>setRole(e.target.value)} aria-label="Filter by role"><option>All roles</option>{roleOptions.map(item=><option key={item}>{item}</option>)}</select><select value={recency} onChange={e=>setRecency(e.target.value)} aria-label="Filter by age"><option>All time</option><option>1 hour</option><option>24 hours</option><option>3 days</option><option>7 days</option></select><select value={source} onChange={e=>setSource(e.target.value)} aria-label="Filter by source"><option>All sources</option>{[...new Set(jobs.map(j=>j.source))].map(s=><option key={s}>{s}</option>)}</select><select value={workplace} onChange={e=>setWorkplace(e.target.value)} aria-label="Filter by workplace"><option>All locations</option><option>Remote</option><option>Hybrid</option><option>Onsite</option></select><select value={sort} onChange={e=>setSort(e.target.value)} aria-label="Sort jobs"><option>Newest first</option><option>Oldest first</option></select></div>
-    <div className="table-wrap"><table className="jobs-table"><thead><tr><th>ROLE</th><th>LOCATION</th><th>SOURCE</th><th>POSTED / FOUND</th><th>STATUS</th><th><span className="sr-only">Action</span></th></tr></thead><tbody>{filtered.map(j=><tr key={j.id}><td><div className="role-cell"><span className="company-avatar">{j.company.slice(0,2).toUpperCase()}</span><div><strong>{j.title}</strong><span>{j.company}{j.isNew&&<em>NEW</em>}{j.addedFromBrave&&<em className="brave-origin">DISCOVERY</em>}</span></div></div></td><td><strong className="plain-strong">{j.location}</strong><span className={`workplace ${j.workplace.toLowerCase()}`}>{j.workplace}</span></td><td><span className="source-pill">{j.source}</span></td><td><strong className="time-main">{j.postedAt?relativeTime(j.postedAt):"Unavailable"}</strong><span className="time-sub">Found {relativeTime(j.discoveredAt)}</span></td><td><select className={`status-select status-${j.status.toLowerCase()}`} value={j.status} onChange={e=>updateStatus(j.id,e.target.value as Status)} aria-label={`Status for ${j.title}`}>{statuses.map(s=><option key={s}>{s}</option>)}</select></td><td><a className="apply-link" href={j.applyUrl} target="_blank" rel="noreferrer">Apply <Icon name="external"/></a></td></tr>)}</tbody></table>{filtered.length===0&&<div className="empty-state"><Icon name="search"/><h3>No jobs match these filters</h3><p>Clear a filter or try a broader search.</p></div>}</div></section>
-    <footer className="footer-note"><span><i className="healthy"/> US roles only • Sponsorship never hides a job</span><span>ATS APIs and validated board catalog</span></footer>
-  </>:view==="brave"?<>
-    <div className="experiment-note"><div><strong>Persistent 7-day Google review queue</strong><span>Validated jobs remain across scans until added, dismissed, or aged out.</span></div><span className="experiment-badge">ATS VALIDATED</span></div>
-    <div className="stats-grid brave-stats"><article><span>FRESH ≤ 7 DAYS</span><strong>{braveFresh}</strong><small>Apply to these first</small></article><article><span>OLDER</span><strong>{braveOlder}</strong><small>Active, but lower priority</small></article><article><span>DUPLICATES</span><strong>{braveDuplicates}</strong><small>Hidden by default</small></article><article><span>SEARCH DOMAINS</span><strong>12</strong><small>Supported validators only</small></article></div>
-    <section className="panel"><div className="panel-top"><div><h2>Validated Google jobs</h2><p>{braveMetrics?`${filteredBrave.length} jobs match this view • ${braveResults.length} retained in the 7-day queue`:"Run the first production Google scan"}</p></div>{braveMetrics&&<span className={`run-status status-${braveMetrics.status}`}>{braveMetrics.validationRemaining?"validating":"validated"}</span>}</div>
-    <div className="brave-filters"><select value={braveRecency} onChange={e=>setBraveRecency(e.target.value)} aria-label="Filter Google jobs by age"><option>1 day</option><option>3 days</option><option>7 days</option><option>All time</option></select><select value={showBraveDuplicates?"Show duplicates":"Hide duplicates"} onChange={e=>setShowBraveDuplicates(e.target.value==="Show duplicates")} aria-label="Show or hide ATS duplicates"><option>Hide duplicates</option><option>Show duplicates</option></select><select value={braveSort} onChange={e=>setBraveSort(e.target.value)} aria-label="Sort Google jobs"><option>Newest first</option><option>Oldest first</option></select></div>
-    <div className="table-wrap"><table className="jobs-table brave-table"><thead><tr><th>VALIDATED JOB</th><th>LOCATION</th><th>ATS / QUERY</th><th>SIGNALS</th><th>POSTED / SEEN</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filteredBrave.map(item=><tr key={item.id}><td><div className="result-copy"><strong>{item.title}</strong><span>{item.company??item.domain}</span></div></td><td><strong className="plain-strong">{item.location??"US location verified"}</strong></td><td><span className="source-pill">{item.ats}</span><span className="query-label">{item.queryGroup}</span></td><td><div className="signal-row"><span className="signal target">Target role</span>{item.isNewCompany&&<span className="signal new-company">New company</span>}{item.isDuplicate&&<span className="signal duplicate">ATS duplicate</span>}<span className="signal us">US verified</span></div></td><td><strong className="time-main">{item.postedAt?relativeTime(item.postedAt):"Not provided"}</strong><span className="time-sub">Found {relativeTime(item.discoveredAt)} • Seen {relativeTime(item.lastSeenAt)}</span></td><td><div className="job-actions"><a className="apply-link" href={item.resultUrl} target="_blank" rel="noreferrer">Open job <Icon name="external"/></a>{item.isDuplicate?<span className="already-added">In ATS Feed</span>:<><button className="promote-btn" onClick={()=>void promoteBraveJob(item.id)} disabled={promotingId===item.id||dismissingId===item.id}>{promotingId===item.id?"Adding…":"Add to ATS Feed"}</button><button className="dismiss-btn" onClick={()=>void dismissBraveJob(item.id)} disabled={dismissingId===item.id||promotingId===item.id}>{dismissingId===item.id?"Dismissing…":"Dismiss"}</button></>}</div></td></tr>)}</tbody></table>{filteredBrave.length===0&&<div className="empty-state brave-empty"><Icon name="search"/><h3>No Google jobs match this view</h3><p>Run a Google scan or choose a longer time range.</p></div>}</div></section>
-    <footer className="footer-note"><span>Seven-day default • Newest first • Duplicates hidden</span><span>{googleUsage?`${googleUsage.queries.toLocaleString()}/${googleUsage.limit.toLocaleString()} Google queries used this month`:"45,000-query monthly safety limit"}</span></footer>
-  </>:<>
-    <div className="audit-note"><div><strong>Phase 1 • HITL coverage audit</strong><span>Read-only comparison. Nothing here can add, remove, or change a job.</span></div><select value={auditRecency} onChange={event=>{const value=event.target.value;setAuditRecency(value);void loadAudit(value)}} aria-label="Coverage audit time window"><option>1 day</option><option>3 days</option><option>7 days</option></select></div>
-    <div className="stats-grid audit-stats"><article><span>VALID JOBS</span><strong>{auditTotals.valid}</strong><small>Authoritative ATS baseline</small></article><article><span>SEARCH CANDIDATES</span><strong>{auditTotals.candidates}</strong><small>Within {auditRecency}</small></article><article><span>EXCLUDED</span><strong>{auditTotals.excluded}</strong><small>Expired, foreign, or irrelevant</small></article><article><span>NEW COMPANIES</span><strong>{auditTotals.newCompanies}</strong><small>{auditTotals.duplicates} ATS duplicates</small></article></div>
-    <section className="panel audit-panel"><div className="panel-top"><div><h2>Exact-query comparison matrix</h2><p>Open both engines, keep the selected time window, and compare their valid job URLs with the Job Radar baseline.</p></div><span className="run-status status-succeeded">READ ONLY</span></div>
-    <div className="table-wrap"><table className="jobs-table audit-table"><thead><tr><th>ATS / QUERY</th><th>RADAR VALID</th><th>CANDIDATES</th><th>EXCLUDED</th><th>DUPLICATES</th><th>MANUAL SEARCH</th></tr></thead><tbody>{auditRows.map(row=><tr key={`${row.domain}-${row.key}`}><td><div className="audit-query"><strong>{row.ats} • {row.label}</strong><code>{row.queryText}</code></div></td><td><strong className="audit-count">{row.valid}</strong></td><td>{row.candidates}</td><td>{row.excluded}</td><td>{row.duplicates}</td><td><div className="audit-links"><a href={`https://www.google.com/search?q=${encodeURIComponent(row.queryText)}`} target="_blank" rel="noreferrer">Google <Icon name="external"/></a></div></td></tr>)}</tbody></table></div></section>
-    {auditRun&&<section className="panel audit-jobs-panel"><div className="panel-top"><div><h2>ATS-validated audit jobs</h2><p>{validatedAuditJobs.length} active US target-role jobs from the latest {auditRecency} audit</p></div><span className={`run-status status-${auditRun.status}`}>{auditRun.status}</span></div><div className="table-wrap"><table className="jobs-table audit-jobs-table"><thead><tr><th>VALIDATED JOB</th><th>LOCATION</th><th>ATS / QUERY</th><th>SEARCH INDEXED</th><th>ATS POSTED</th><th><span className="sr-only">Open</span></th></tr></thead><tbody>{validatedAuditJobs.map(item=><tr key={item.id}><td><div className="result-copy"><strong>{item.title}</strong><span>{item.company??item.domain}</span></div></td><td><strong className="plain-strong">{item.location??"US verified"}</strong></td><td><span className="source-pill">{item.ats}</span><span className="query-label">{item.queryGroup==="data_analytics"?"Data + Analytics":"AI + Engineering"}</span></td><td><strong className="time-main">{item.searchIndexedAt?relativeTime(item.searchIndexedAt):"Not provided"}</strong><span className="time-sub">Search signal</span></td><td><strong className="time-main">{item.postedAt?relativeTime(item.postedAt):"Not provided"}</strong><span className="time-sub">Authoritative ATS</span></td><td><a className="apply-link" href={item.resultUrl} target="_blank" rel="noreferrer">Open <Icon name="external"/></a></td></tr>)}</tbody></table>{validatedAuditJobs.length===0&&<div className="empty-state"><Icon name="search"/><h3>No validated jobs in this audit yet</h3><p>Run the selected coverage window, then compare its verified URLs.</p></div>}</div></section>}
-    <section className="audit-instructions"><div><span>1</span><p><strong>Historical evidence</strong>This audit remains available as the V1.2.2 comparison baseline.</p></div><div><span>2</span><p><strong>Google is active</strong>New production discovery runs from the Google Discovery tab.</p></div><div><span>3</span><p><strong>Brave is disabled</strong>The previous connector remains available only as rollback code.</p></div></section>
-    <footer className="footer-note"><span>ATS listing remains authoritative</span><span>V1.2.2 feed and application history are untouched</span></footer>
-  </>}</section></main>
+  /**
+   * One click does the whole pipeline: stage the catalog, validate pending boards, then scan every active
+   * board in slices until none remain. Each request is small so it stays inside hosting time limits.
+   */
+  const runFullScan = async () => {
+    setScanning(true);
+    stopRequested.current = false;
+    let totalNew = 0, totalRefreshed = 0, boardsScanned = 0;
+    try {
+      let stats = sourceStats;
+      if (!stats?.catalogComplete) {
+        let offset = stats?.catalogOffset ?? 0, complete = false;
+        while (!complete && !stopRequested.current) {
+          setNotice(`Loading company catalog… ${offset.toLocaleString()} / ${(stats?.seedCatalogSize ?? 0).toLocaleString()} boards staged`);
+          const result = await post<{ nextOffset: number; complete: boolean }>("/api/sources", { offset, limit: 250 });
+          offset = result.nextOffset; complete = result.complete;
+        }
+      }
+      let remainingPending = Infinity, validated = 0, activeFound = 0;
+      while (remainingPending > 0 && !stopRequested.current) {
+        setNotice(`Checking catalog boards… ${validated.toLocaleString()} checked, ${activeFound.toLocaleString()} live${Number.isFinite(remainingPending) ? `, ${remainingPending.toLocaleString()} left` : ""}`);
+        const result = await post<{ checked: number; active: number; remaining: number }>("/api/internal/validate-sources", { limit: 30 });
+        validated += result.checked; activeFound += result.active; remainingPending = result.remaining;
+        if (result.checked === 0) break;
+      }
+      stats = await (await fetch("/api/sources", { cache: "no-store" })).json() as SourceStats;
+      setSourceStats(stats);
+      // The server picks the cut-off timestamp on the first request; reusing it keeps the loop finite
+      // even when the browser clock and the server clock disagree.
+      let since: string | undefined;
+      let remaining = Infinity;
+      while (remaining > 0 && !stopRequested.current) {
+        setNotice(`Scanning boards… ${boardsScanned.toLocaleString()} / ${stats.active.toLocaleString()} scanned, ${totalNew} new jobs so far`);
+        const result = await post<{ scanned: number; inserted: number; updated: number; remaining: number; since: string }>("/api/internal/ingest", { limit: 25, since });
+        since = result.since;
+        boardsScanned += result.scanned; totalNew += result.inserted; totalRefreshed += result.updated; remaining = result.remaining;
+        if (result.scanned === 0) break;
+        if (boardsScanned % 100 < 25) await loadJobs();
+      }
+      setNotice(`${stopRequested.current ? "Scan stopped" : "Scan finished"}: ${totalNew} new jobs, ${totalRefreshed} refreshed across ${boardsScanned.toLocaleString()} boards.`);
+    } catch (error) {
+      setNotice(`Scan stopped early (${error instanceof Error ? error.message : "unknown error"}). ${totalNew} new jobs were saved; click Scan again to continue where it left off.`);
+    } finally {
+      await Promise.all([loadJobs(), loadSourceStats()]);
+      setScanning(false);
+    }
+  };
+
+  const sendDigest = async () => {
+    setNotice("Preparing digest…");
+    const response = await fetch("/api/internal/digest", { method: "POST" });
+    const result = await response.json() as { message?: string; sent?: number };
+    setNotice(response.ok ? `Email digest sent with ${result.sent ?? 0} jobs.` : result.message ?? "Email digest needs RESEND_API_KEY and JOB_ALERT_EMAIL.");
+  };
+
+  const updateStatus = async (id: string, status: Status) => {
+    const before = jobs.find(job => job.id === id)?.status;
+    setJobs(all => all.map(job => job.id === id ? { ...job, status } : job));
+    const response = await fetch("/api/jobs", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, status }) });
+    if (!response.ok && before) setJobs(all => all.map(job => job.id === id ? { ...job, status: before } : job));
+  };
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return jobs.filter(job => {
+      const haystack = `${job.title} ${job.company} ${job.location}`.toLowerCase();
+      const ageHours = (now - new Date(job.postedAt ?? job.discoveredAt).getTime()) / 3600000;
+      const statusOk = statusFilter === "All statuses" || (statusFilter === "Open" ? !closedStatuses.includes(job.status) : job.status === statusFilter);
+      return (!needle || haystack.includes(needle))
+        && statusOk
+        && (role === "All roles" || classifyRole(job.title) === role)
+        && (source === "All sources" || job.source === source)
+        && (workplace === "All locations" || job.workplace === workplace)
+        && (recency === "All time" || ageHours <= recencyHours[recency]);
+    }).sort((a, b) => {
+      const av = new Date(a.postedAt ?? a.discoveredAt).getTime(), bv = new Date(b.postedAt ?? b.discoveredAt).getTime();
+      return sort === "Newest first" ? bv - av : av - bv;
+    });
+  }, [jobs, query, role, source, workplace, recency, statusFilter, sort, now]);
+
+  const openJobs = jobs.filter(job => !closedStatuses.includes(job.status));
+  const newCount = openJobs.filter(job => job.status === "New").length;
+  const weekCount = openJobs.filter(job => now - new Date(job.postedAt ?? job.discoveredAt).getTime() < 7 * 86400000).length;
+  const appliedCount = jobs.filter(job => job.status === "Applied").length;
+  const interviewCount = jobs.filter(job => job.status === "Interview").length;
+  const sources = [...new Set(jobs.map(job => job.source))].sort();
+  const lastScanLabel = sourceStats?.lastFullScanAt ? `Full scan ${relativeTime(sourceStats.lastFullScanAt)}` : sourceStats?.lastScheduledRunAt ? `Auto-scan ${relativeTime(sourceStats.lastScheduledRunAt)}` : "No scan yet";
+
+  return <main className="app-shell">
+    <header className="topbar">
+      <div className="brand"><span className="brand-mark"><Icon name="radar" /></span><div><strong>Sai Job Radar</strong><span>US data, AI &amp; engineering jobs, one feed</span></div></div>
+      <div className="top-actions">
+        <span className="live-pill"><i /> {lastScanLabel}</span>
+        <button className="secondary-btn" onClick={() => void sendDigest()}><Icon name="mail" /> Email digest</button>
+        {scanning
+          ? <button className="primary-btn" onClick={() => { stopRequested.current = true; setNotice("Stopping after the current batch…"); }}><Icon name="stop" /> Stop</button>
+          : <button className="primary-btn" onClick={() => void runFullScan()}><Icon name="refresh" /> Scan all boards</button>}
+      </div>
+    </header>
+
+    <section className="workspace">
+      <div className="page-heading">
+        <div><p className="eyebrow">30-DAY JOB SEARCH</p><h1>Your job command center</h1><p>Live openings pulled straight from company ATS boards, filtered to US data / AI / engineering roles.</p></div>
+        <div className="sync-copy"><span>Last refreshed</span><strong>{lastRefresh ? lastRefresh.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Loading…"}</strong><small>{sourceStats ? `${sourceStats.active.toLocaleString()} live boards` : ""}</small></div>
+      </div>
+
+      {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss notification">×</button></div>}
+
+      <div className="stats-grid">
+        <article><span>NEW JOBS</span><strong>{newCount}</strong><small>Waiting for your review</small></article>
+        <article><span>POSTED THIS WEEK</span><strong>{weekCount}</strong><small>Apply to these first</small></article>
+        <article><span>APPLICATIONS</span><strong>{appliedCount}</strong><small>Statuses saved automatically</small></article>
+        <article><span>INTERVIEWS</span><strong>{interviewCount}</strong><small>Keep the pipeline moving</small></article>
+      </div>
+
+      <section className="panel">
+        <div className="panel-top">
+          <div><h2>Job feed</h2><p>{filtered.length} of {openJobs.length} open jobs match this view</p></div>
+          <div className="source-health"><span><i className="healthy" /> {sourceStats ? `${sourceStats.active.toLocaleString()} live boards • ${sourceStats.pending.toLocaleString()} unchecked • ${sourceStats.invalid.toLocaleString()} dead • ${sourceStats.catalogOffset.toLocaleString()}/${sourceStats.seedCatalogSize.toLocaleString()} catalog loaded` : "Loading sources…"}</span></div>
+        </div>
+        <div className="filters">
+          <label className="search-box"><Icon name="search" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search title, company, or location" aria-label="Search jobs" /></label>
+          <select value={role} onChange={event => setRole(event.target.value)} aria-label="Filter by role"><option>All roles</option>{roleFamilies.map(item => <option key={item}>{item}</option>)}</select>
+          <select value={recency} onChange={event => setRecency(event.target.value)} aria-label="Filter by age"><option>24 hours</option><option>3 days</option><option>7 days</option><option>14 days</option><option>30 days</option><option>All time</option></select>
+          <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)} aria-label="Filter by status"><option>Open</option><option>All statuses</option>{statuses.map(item => <option key={item}>{item}</option>)}</select>
+          <select value={source} onChange={event => setSource(event.target.value)} aria-label="Filter by source"><option>All sources</option>{sources.map(item => <option key={item}>{item}</option>)}</select>
+          <select value={workplace} onChange={event => setWorkplace(event.target.value)} aria-label="Filter by workplace"><option>All locations</option><option>Remote</option><option>Hybrid</option><option>Onsite</option></select>
+          <select value={sort} onChange={event => setSort(event.target.value)} aria-label="Sort jobs"><option>Newest first</option><option>Oldest first</option></select>
+        </div>
+        <div className="table-wrap">
+          <table className="jobs-table">
+            <thead><tr><th>ROLE</th><th>LOCATION</th><th>SOURCE</th><th>POSTED / FOUND</th><th>STATUS</th><th><span className="sr-only">Action</span></th></tr></thead>
+            <tbody>
+              {filtered.map(job => {
+                const isNew = now - new Date(job.discoveredAt).getTime() < 86400000;
+                return <tr key={job.id}>
+                  <td><div className="role-cell"><span className="company-avatar">{job.company.slice(0, 2).toUpperCase()}</span><div><strong>{job.title}</strong><span>{job.company} · {classifyRole(job.title) ?? "Engineering"} · {seniority(job.title)}{isNew && <em>NEW</em>}</span></div></div></td>
+                  <td><strong className="plain-strong">{job.location}</strong><span className={`workplace ${job.workplace.toLowerCase()}`}>{job.workplace}</span></td>
+                  <td><span className="source-pill">{job.source}</span></td>
+                  <td><strong className="time-main">{job.postedAt ? `Posted ${relativeTime(job.postedAt)}` : "Post date unknown"}</strong><span className="time-sub">Found {relativeTime(job.discoveredAt)} · Seen {relativeTime(job.lastSeenAt)}</span></td>
+                  <td><select className={`status-select status-${job.status.toLowerCase()}`} value={job.status} onChange={event => void updateStatus(job.id, event.target.value as Status)} aria-label={`Status for ${job.title}`}>{statuses.map(item => <option key={item}>{item}</option>)}</select></td>
+                  <td><a className="apply-link" href={job.applyUrl} target="_blank" rel="noreferrer">Apply <Icon name="external" /></a></td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+          {filtered.length === 0 && <div className="empty-state"><Icon name="search" /><h3>{jobs.length === 0 ? "No jobs yet" : "No jobs match these filters"}</h3><p>{jobs.length === 0 ? "Click “Scan all boards” to pull live openings from every company board." : "Clear a filter or pick a longer time range."}</p></div>}
+        </div>
+      </section>
+      <footer className="footer-note"><span><i className="healthy" /> US roles only • Jobs that leave a board are marked Closed automatically</span><span>{sourceStats?.lastScheduledRunAt ? `Hourly auto-scan last ran ${relativeTime(sourceStats.lastScheduledRunAt)}` : "Hourly auto-scan has not run yet"}</span></footer>
+    </section>
+  </main>;
 }

@@ -1,5 +1,16 @@
 # Sai Job Radar versions
 
+## V2.1 — Working feed
+
+- Fixed the US location filter, which rejected "Remote U.S.", "Remote (US)", "San Francisco", "New York" and most city-only locations.
+- Broadened role matching to cover data platform / ML infra / research engineer / analyst titles; excludes managers, interns, sales, and data-center roles.
+- Use Greenhouse `first_published` (not `updated_at`) as the posted date; default the feed to the last 30 days instead of 7.
+- "Scan all boards" now covers every active board in one click (looping 25 boards per request) instead of 40 boards per click.
+- Added a Worker `scheduled()` handler and hourly cron so the feed refreshes without clicking.
+- Jobs that disappear from a board get a `Closed` status automatically (and reopen as New if they come back); placeholder seed jobs are removed.
+- Batched D1 writes so a scan stays inside Worker request limits.
+- Removed the Brave/Google discovery experiment, coverage audit, ChatGPT auth helper, and HTML-scraping connectors.
+
 ## V2.0 alpha 1 — Isolated coverage audit
 
 - Kept V1.2.2 frozen as the stable rollback point.
