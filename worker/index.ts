@@ -1,7 +1,7 @@
 /** Cloudflare Worker entry point: serves the app and runs the scheduled board scans. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { runScheduledMaintenance } from "../lib/pipeline";
+import { runScheduledMaintenance } from "../lib/scheduled";
 
 interface Env {
   ASSETS: Fetcher;

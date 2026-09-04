@@ -11,7 +11,7 @@ type Job = {
 type SourceStats = {
   total: number; active: number; pending: number; invalid: number; errored: number; seedCatalogSize: number; catalogOffset: number;
   catalogComplete: boolean; lastFullScanAt: string | null; lastScheduledRunAt: string | null; oldestScanAt: string | null;
-  discoveryConfigured: boolean; lastDiscoveryAt: string | null; discoveredBoards: number; serperCreditsUsed: number;
+  discoveryConfigured: boolean; discoveryIntervalHours: number; creditsPerDiscoveryRun: number; lastDiscoveryAt: string | null; discoveredBoards: number; serperCreditsUsed: number;
 };
 
 const statuses: Status[] = ["New", "Saved", "Applied", "Interview", "Rejected", "Archived", "Closed"];
@@ -137,8 +137,8 @@ export default function Home() {
   const runDiscovery = async () => {
     setNotice("Asking Google for company boards not in the catalog yet…");
     const response = await fetch("/api/internal/discover", { method: "POST" });
-    const result = await response.json() as { configured?: boolean; newSources?: number; queries?: number; error?: string };
-    setNotice(!response.ok || !result.configured ? (result.error ?? "Google discovery needs a SERPER_API_KEY setting on the site.") : `Discovery finished: ${result.newSources ?? 0} new company boards found from ${result.queries ?? 0} searches. They will be checked and scanned on the next auto-scan (or click Scan all boards).`);
+    const result = await response.json() as { configured?: boolean; newSources?: number; bumpedBoards?: number; unverifiedJobs?: number; queries?: number; error?: string };
+    setNotice(!response.ok || !result.configured ? (result.error ?? "Google discovery needs a SERPER_API_KEY setting on the site.") : `Google discovery finished: ${result.newSources ?? 0} new companies, ${result.bumpedBoards ?? 0} known boards with fresh postings queued first, ${result.unverifiedJobs ?? 0} unverified jobs added from ${result.queries ?? 0} searches. New companies are scanned on the next auto-scan (or click Scan all boards).`);
     await loadSourceStats();
   };
 
@@ -231,7 +231,7 @@ export default function Home() {
               {filtered.map(job => {
                 const isNew = now - new Date(job.discoveredAt).getTime() < 86400000;
                 return <tr key={job.id}>
-                  <td><div className="role-cell"><span className="company-avatar">{job.company.slice(0, 2).toUpperCase()}</span><div><strong>{job.title}</strong><span>{job.company} · {classifyRole(job.title) ?? "Engineering"} · {seniority(job.title)}{isNew && <em>NEW</em>}</span></div></div></td>
+                  <td><div className="role-cell"><span className="company-avatar">{job.company.slice(0, 2).toUpperCase()}</span><div><strong>{job.title}</strong><span>{job.company} · {classifyRole(job.title) ?? "Engineering"} · {seniority(job.title)}{isNew && <em>NEW</em>}{job.source.includes("(Google)") && <em className="unverified">UNVERIFIED</em>}</span></div></div></td>
                   <td><strong className="plain-strong">{job.location}</strong><span className={`workplace ${job.workplace.toLowerCase()}`}>{job.workplace}</span></td>
                   <td><span className="source-pill">{job.source}</span></td>
                   <td><strong className="time-main">{job.postedAt ? `Posted ${relativeTime(job.postedAt)}` : "Post date unknown"}</strong><span className="time-sub">Found {relativeTime(job.discoveredAt)} · Seen {relativeTime(job.lastSeenAt)}</span></td>
@@ -244,7 +244,7 @@ export default function Home() {
           {filtered.length === 0 && <div className="empty-state"><Icon name="search" /><h3>{jobs.length === 0 ? "No jobs yet" : "No jobs match these filters"}</h3><p>{jobs.length === 0 ? "Click “Scan all boards” to pull live openings from every company board." : "Clear a filter or pick a longer time range."}</p></div>}
         </div>
       </section>
-      <footer className="footer-note"><span><i className="healthy" /> US roles only • Jobs that leave a board are marked Closed automatically</span><span>{sourceStats?.lastScheduledRunAt ? `Auto-scan last ran ${relativeTime(sourceStats.lastScheduledRunAt)}` : "Auto-scan (every 15 min) has not run yet"}{sourceStats && (sourceStats.discoveryConfigured ? ` • Google discovery ${sourceStats.lastDiscoveryAt ? `ran ${relativeTime(sourceStats.lastDiscoveryAt)}` : "pending"}, ${sourceStats.discoveredBoards} companies found, ${sourceStats.serperCreditsUsed.toLocaleString()} Serper credits used` : " • Google discovery off (add SERPER_API_KEY)")}</span></footer>
+      <footer className="footer-note"><span><i className="healthy" /> US roles only • Jobs that leave a board are marked Closed automatically</span><span>{sourceStats?.lastScheduledRunAt ? `Auto-scan last ran ${relativeTime(sourceStats.lastScheduledRunAt)}` : "Auto-scan (every 15 min) has not run yet"}{sourceStats && (sourceStats.discoveryConfigured ? ` • Google discovery every ${sourceStats.discoveryIntervalHours}h (${sourceStats.creditsPerDiscoveryRun} credits/run) ${sourceStats.lastDiscoveryAt ? `last ran ${relativeTime(sourceStats.lastDiscoveryAt)}` : "pending"}, ${sourceStats.discoveredBoards} companies found, ${sourceStats.serperCreditsUsed.toLocaleString()} Serper credits used` : " • Google discovery off (add SERPER_API_KEY)")}</span></footer>
     </section>
   </main>;
 }

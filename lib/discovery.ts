@@ -1,31 +1,43 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { env } from "cloudflare:workers";
 import { getDb } from "../db";
-import { discoveryRuns, sourceBoards } from "../db/schema";
+import { discoveryRuns, jobs, sourceBoards } from "../db/schema";
 import { enabledAts } from "./ats-connectors";
+import { isUsLocation, workplaceType } from "./locations";
+import { classifyRole } from "./roles";
 import { getState, setState } from "./state";
 
 /**
- * Daily company discovery. Google (via Serper) is only used to find *company boards* we do not have
- * in the catalog yet; the jobs themselves always come straight from the ATS feeds, which are free and
- * faster than Google indexing. Newly found boards are staged as pending, validated by the next
- * scheduled run, and scanned right after — so a company you have never heard of still shows up.
+ * Top-down discovery through Google (Serper). Every few hours we ask Google for job pages posted in
+ * the past day on every major ATS domain, then:
+ *   1. Any company board we have never seen is added to the catalog, validated, and scanned right away.
+ *   2. Any known board that Google shows a fresh job for is bumped to the front of the scan queue.
+ *   3. Jobs on ATS platforms we cannot read directly (Workday, iCIMS, Jobvite, JazzHR, Teamtailor, ...)
+ *      are added straight to the feed from the search result, marked "unverified".
+ * So a job shows up whether or not its company was in the database beforehand.
  */
 
-const atsHosts: Array<{ ats: string; hosts: string[] }> = [
-  { ats: "Ashby", hosts: ["jobs.ashbyhq.com"] },
-  { ats: "Greenhouse", hosts: ["job-boards.greenhouse.io", "boards.greenhouse.io"] },
-  { ats: "Lever", hosts: ["jobs.lever.co"] },
-  { ats: "Workable", hosts: ["apply.workable.com", "jobs.workable.com"] },
-  { ats: "SmartRecruiters", hosts: ["jobs.smartrecruiters.com", "careers.smartrecruiters.com"] },
-  { ats: "Rippling", hosts: ["ats.rippling.com"] },
-  { ats: "Recruitee", hosts: ["recruitee.com"] },
-  { ats: "Breezy", hosts: ["breezy.hr"] },
-  { ats: "Pinpoint", hosts: ["pinpointhq.com"] },
+type SearchBindings = { SERPER_API_KEY?: string; DISCOVERY_INTERVAL_HOURS?: string };
+const bindings = () => env as unknown as SearchBindings;
+
+const atsHosts: Array<{ ats: string; hosts: string[]; supported: boolean }> = [
+  { ats: "Ashby", hosts: ["jobs.ashbyhq.com"], supported: true },
+  { ats: "Greenhouse", hosts: ["job-boards.greenhouse.io", "boards.greenhouse.io"], supported: true },
+  { ats: "Lever", hosts: ["jobs.lever.co"], supported: true },
+  { ats: "Workable", hosts: ["apply.workable.com"], supported: true },
+  { ats: "SmartRecruiters", hosts: ["jobs.smartrecruiters.com"], supported: true },
+  { ats: "Rippling", hosts: ["ats.rippling.com"], supported: true },
+  { ats: "Recruitee", hosts: ["recruitee.com"], supported: true },
+  { ats: "Breezy", hosts: ["breezy.hr"], supported: true },
+  { ats: "Pinpoint", hosts: ["pinpointhq.com"], supported: true },
+  { ats: "Workday", hosts: ["myworkdayjobs.com"], supported: false },
+  { ats: "iCIMS", hosts: ["icims.com"], supported: false },
+  { ats: "Jobvite", hosts: ["jobs.jobvite.com"], supported: false },
+  { ats: "JazzHR", hosts: ["applytojob.com"], supported: false },
+  { ats: "Teamtailor", hosts: ["jobs.teamtailor.com"], supported: false },
+  { ats: "BambooHR", hosts: ["bamboohr.com"], supported: false },
 ];
 
-// Each query is `site:<domain> (<phrases>)` restricted to the past day. 10 domains × 4 groups = 40 queries.
-export const discoveryDomains = atsHosts.flatMap(item => item.hosts).filter(host => host !== "jobs.workable.com" && host !== "careers.smartrecruiters.com");
 export const discoveryPhraseGroups = [
   ["Data Engineer", "Data Platform Engineer", "Analytics Engineer", "ETL Engineer"],
   ["Data Scientist", "Data Analyst", "Business Intelligence Engineer", "BI Engineer"],
@@ -33,7 +45,12 @@ export const discoveryPhraseGroups = [
   ["Forward Deployed Engineer", "GTM Engineer", "Cloud Engineer", "AWS Engineer", "Product Engineer"],
 ];
 
-export type ParsedSource = { id: string; ats: string; slug: string; companyName: string; boardUrl: string; origin: string };
+// Supported domains get 100 results per query (2 credits); unsupported ones 10 results (1 credit).
+const plans = atsHosts.flatMap(item => item.hosts.map(domain => ({ domain, ats: item.ats, supported: item.supported })))
+  .flatMap(plan => discoveryPhraseGroups.map(phrases => ({ ...plan, phrases, num: plan.supported ? 100 : 10 })));
+export const creditsPerDiscoveryRun = plans.reduce((sum, plan) => sum + (plan.num > 10 ? 2 : 1), 0);
+
+export type ParsedSource = { id: string; ats: string; slug: string; companyName: string; boardUrl: string; origin: string; supported: boolean };
 
 export function parseSourceUrl(rawUrl: string, origin = "google-discovery"): ParsedSource | null {
   try {
@@ -41,65 +58,112 @@ export function parseSourceUrl(rawUrl: string, origin = "google-discovery"): Par
     const match = atsHosts.find(item => item.hosts.some(value => host === value || host.endsWith(`.${value}`)));
     if (!match) return null;
     let slug = parts[0] ?? "";
-    if (["Recruitee", "Breezy", "Pinpoint"].includes(match.ats)) slug = host.split(".")[0];
-    if (match.ats === "Workable" && host === "jobs.workable.com") return null; // per-job pages, no company in the URL
-    if (!slug || ["embed", "jobs", "job", "careers", "apply", "j", "o", "p"].includes(slug.toLowerCase())) return null;
+    if (["Recruitee", "Breezy", "Pinpoint", "Workday", "Teamtailor", "BambooHR", "iCIMS"].includes(match.ats)) slug = host.split(".")[0];
+    if (!slug || ["embed", "jobs", "job", "careers", "apply", "j", "o", "p", "www"].includes(slug.toLowerCase())) return null;
     slug = decodeURIComponent(slug).trim().replace(/[?#].*$/, "");
     if (!/^[a-z0-9][a-z0-9._ -]{0,80}$/i.test(slug)) return null;
     const id = `${match.ats}:${slug}`.toLowerCase();
-    const boardUrl = ["Recruitee", "Breezy", "Pinpoint"].includes(match.ats) ? `https://${host}` : `https://${host}/${encodeURIComponent(slug)}`;
+    const boardUrl = parts[0] === slug ? `https://${host}/${encodeURIComponent(slug)}` : `https://${host}`;
     const companyName = slug.replace(/[-_.]+/g, " ").replace(/\b\w/g, char => char.toUpperCase());
-    return { id, ats: match.ats, slug, companyName, boardUrl, origin };
+    return { id, ats: match.ats, slug, companyName, boardUrl, origin, supported: match.supported };
   } catch {
     return null;
   }
 }
 
-type SerperResponse = { organic?: Array<{ link?: string }> };
+type SerperItem = { title?: string; link?: string; snippet?: string; date?: string };
+type SerperResponse = { organic?: SerperItem[] };
 
-async function serperSearch(key: string, domain: string, phrases: string[]) {
+async function serperSearch(key: string, plan: { domain: string; phrases: string[]; num: number }) {
   const response = await fetch("https://google.serper.dev/search", {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json", "x-api-key": key },
-    body: JSON.stringify({ q: `site:${domain} (${phrases.map(phrase => `"${phrase}"`).join(" OR ")})`, gl: "us", hl: "en", tbs: "qdr:d", num: 100 }),
+    body: JSON.stringify({ q: `site:${plan.domain} (${plan.phrases.map(phrase => `"${phrase}"`).join(" OR ")})`, gl: "us", hl: "en", tbs: "qdr:d", num: plan.num }),
   });
   if (!response.ok) throw new Error(`Serper ${response.status}`);
   return response.json() as Promise<SerperResponse>;
 }
 
-export function discoveryConfigured() {
-  return Boolean((env as unknown as { SERPER_API_KEY?: string }).SERPER_API_KEY);
+function normalizeUrl(raw: string) {
+  const url = new URL(raw);
+  url.hash = ""; url.search = "";
+  url.pathname = url.pathname.replace(/\/(?:apply|application)\/?$/i, "").replace(/\/+$/g, "") || "/";
+  return url.toString();
 }
 
+// Google titles look like "Senior Data Engineer - Acme Corp" or "Data Scientist | Acme | Workday".
+function splitTitle(raw: string, fallbackCompany: string) {
+  const parts = raw.split(/\s+[-|–—·]\s+/).map(part => part.trim()).filter(Boolean);
+  const title = parts[0] ?? raw.trim();
+  const company = parts.slice(1).find(part => !/\b(?:job|jobs|careers?|workday|icims|apply|greenhouse|lever)\b/i.test(part)) ?? fallbackCompany;
+  return { title, company };
+}
+
+function guessLocation(text: string) {
+  const match = text.match(/\b(?:Remote(?:[ -]+(?:US|USA|U\.S\.|United States))?|[A-Z][a-zA-Z.]+(?: [A-Z][a-zA-Z.]+)?,\s?(?:[A-Z]{2}|[A-Z][a-z]+(?: [A-Z][a-z]+)?)(?:,\s?(?:USA?|United States))?|United States)\b/);
+  return match?.[0] ?? "";
+}
+
+export function discoveryConfigured() { return Boolean(bindings().SERPER_API_KEY); }
+export function discoveryIntervalHours() { return Math.max(1, Number(bindings().DISCOVERY_INTERVAL_HOURS ?? 2) || 2); }
+
 export async function discoverNewBoards() {
-  const key = (env as unknown as { SERPER_API_KEY?: string }).SERPER_API_KEY;
-  if (!key) return { configured: false, queries: 0, results: 0, newSources: 0, failed: 0 };
+  const key = bindings().SERPER_API_KEY;
+  if (!key) return { configured: false as const, queries: 0, results: 0, newSources: 0, bumpedBoards: 0, unverifiedJobs: 0, failed: 0 };
   const db = getDb();
   const [run] = await db.insert(discoveryRuns).values({ status: "running" }).returning();
   const existing = new Set((await db.select({ id: sourceBoards.id }).from(sourceBoards)).map(row => row.id));
-  const plans = discoveryDomains.flatMap(domain => discoveryPhraseGroups.map(phrases => ({ domain, phrases })));
-  let queries = 0, results = 0, failed = 0;
-  const found = new Map<string, ParsedSource>();
+  let queries = 0, results = 0, failed = 0, credits = 0;
+  const newBoards = new Map<string, ParsedSource>();
+  const seenBoards = new Set<string>();
+  const unverified = new Map<string, typeof jobs.$inferInsert>();
+  const now = new Date().toISOString();
+
   for (let index = 0; index < plans.length; index += 8) {
     await Promise.all(plans.slice(index, index + 8).map(async plan => {
-      try {
-        const data = await serperSearch(key, plan.domain, plan.phrases);
-        queries++;
-        for (const item of data.organic ?? []) {
-          results++;
-          const parsed = item.link ? parseSourceUrl(item.link) : null;
-          if (parsed && enabledAts.includes(parsed.ats) && !existing.has(parsed.id)) found.set(parsed.id, parsed);
+      let data: SerperResponse;
+      try { data = await serperSearch(key, plan); queries++; credits += plan.num > 10 ? 2 : 1; } catch { failed++; return; }
+      for (const item of data.organic ?? []) {
+        results++;
+        if (!item.link) continue;
+        const parsed = parseSourceUrl(item.link);
+        if (!parsed) continue;
+        if (parsed.supported && enabledAts.includes(parsed.ats)) {
+          if (existing.has(parsed.id)) seenBoards.add(parsed.id); else newBoards.set(parsed.id, parsed);
+          continue;
         }
-      } catch { failed++; }
+        // Unsupported ATS: keep the search result itself when it looks like a US target role.
+        const { title, company } = splitTitle(item.title ?? "", parsed.companyName);
+        const text = `${item.title ?? ""} ${item.snippet ?? ""}`;
+        const location = guessLocation(text) || (/\bremote\b/i.test(text) ? "Remote" : "");
+        if (!classifyRole(title) || !isUsLocation(location)) continue;
+        let url: string;
+        try { url = normalizeUrl(item.link); } catch { continue; }
+        const canonicalKey = `google:${url.toLowerCase()}`;
+        if (unverified.has(canonicalKey)) continue;
+        unverified.set(canonicalKey, {
+          id: canonicalKey, canonicalKey, title, company, location, workplace: workplaceType(location),
+          source: `${parsed.ats} (Google)`, externalJobId: null, sourceUrl: url, applyUrl: url,
+          postedAt: item.date && !Number.isNaN(new Date(item.date).getTime()) ? new Date(item.date).toISOString() : now, discoveredAt: now, lastSeenAt: now, status: "New", isSeed: false,
+        });
+      }
     }));
   }
-  const rows = [...found.values()].map(source => ({ ...source, status: "pending", active: false }));
-  for (let index = 0; index < rows.length; index += 10) await db.insert(sourceBoards).values(rows.slice(index, index + 10)).onConflictDoNothing();
-  const now = new Date().toISOString();
-  await db.update(discoveryRuns).set({ finishedAt: now, status: failed === plans.length ? "failed" : failed ? "partial" : "succeeded", queries, results, newSources: rows.length, failed }).where(eq(discoveryRuns.id, run.id));
-  await setState(db, "last_discovery_at", now);
-  const used = Number(await getState(db, "serper_credits_used") ?? 0) + queries * 2; // num=100 costs 2 credits per query
-  await setState(db, "serper_credits_used", String(used));
-  return { configured: true, queries, results, newSources: rows.length, failed, creditsUsedTotal: used };
-}
 
+  // 1. New company boards → pending; the scheduled run validates and scans them immediately after.
+  const rows = [...newBoards.values()].map(source => ({ id: source.id, ats: source.ats, slug: source.slug, companyName: source.companyName, boardUrl: source.boardUrl, origin: source.origin, status: "pending", active: false }));
+  for (let index = 0; index < rows.length; index += 10) await db.insert(sourceBoards).values(rows.slice(index, index + 10)).onConflictDoNothing();
+  // 2. Known boards with a fresh Google hit → scan first (NULL last_scanned_at sorts first).
+  const bump = [...seenBoards];
+  for (let index = 0; index < bump.length; index += 90) await db.update(sourceBoards).set({ lastScannedAt: null }).where(inArray(sourceBoards.id, bump.slice(index, index + 90)));
+  // 3. Unverified jobs from unsupported ATSs go straight into the feed (never overwrite a job you already have).
+  const unverifiedRows = [...unverified.values()];
+  for (let index = 0; index < unverifiedRows.length; index += 6) await db.insert(jobs).values(unverifiedRows.slice(index, index + 6)).onConflictDoNothing();
+
+  const finished = new Date().toISOString();
+  await db.update(discoveryRuns).set({ finishedAt: finished, status: failed === plans.length ? "failed" : failed ? "partial" : "succeeded", queries, results, newSources: rows.length, failed }).where(eq(discoveryRuns.id, run.id));
+  await setState(db, "last_discovery_at", finished);
+  const used = Number(await getState(db, "serper_credits_used") ?? 0) + credits;
+  await setState(db, "serper_credits_used", String(used));
+  return { configured: true as const, queries, results, newSources: rows.length, bumpedBoards: bump.length, unverifiedJobs: unverifiedRows.length, failed, creditsUsedTotal: used };
+}

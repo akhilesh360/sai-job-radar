@@ -1,4 +1,4 @@
-import { runScheduledMaintenance } from "../../../../lib/pipeline";
+import { runScheduledMaintenance } from "../../../../lib/scheduled";
 
 /**
  * Same work the Worker cron does, callable by hand (or by an external scheduler such as

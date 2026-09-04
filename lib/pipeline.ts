@@ -4,7 +4,6 @@ import { getDb } from "../db";
 import { ingestionRuns, jobs, sourceBoards } from "../db/schema";
 import { boardKeyPrefix, enabledAts, fetchBoardJobs, type CanonicalJob } from "./ats-connectors";
 import { defaultSources } from "./default-sources";
-import { discoverNewBoards, discoveryConfigured } from "./discovery";
 import { getState, setState } from "./state";
 
 type Db = ReturnType<typeof getDb>;
@@ -43,7 +42,7 @@ export async function ensureDefaultSources(db: Db) {
 /** Check pending catalog boards: a board that answers becomes active, one that fails becomes invalid. */
 export async function validatePendingSources(limit = 30, concurrency = 6) {
   const db = getDb();
-  const originPriority = sql`CASE ${sourceBoards.origin} WHEN 'poc' THEN 0 WHEN 'uploaded-lists' THEN 1 WHEN 'spreadsheet-current' THEN 2 WHEN 'spreadsheet-trial' THEN 3 ELSE 4 END`;
+  const originPriority = sql`CASE ${sourceBoards.origin} WHEN 'google-discovery' THEN 0 WHEN 'poc' THEN 1 WHEN 'uploaded-lists' THEN 2 WHEN 'spreadsheet-current' THEN 3 WHEN 'spreadsheet-trial' THEN 4 ELSE 5 END`;
   const pending = await db.select().from(sourceBoards)
     .where(and(eq(sourceBoards.status, "pending"), inArray(sourceBoards.ats, enabledAts)))
     .orderBy(asc(originPriority), asc(sourceBoards.id)).limit(Math.min(60, Math.max(1, limit)));
@@ -139,22 +138,4 @@ export async function scanBoards(options: { limit?: number; since?: string; conc
   await db.update(ingestionRuns).set({ finishedAt: now(), status, fetched, inserted, updated, failed }).where(eq(ingestionRuns.id, run.id));
   if (remaining === 0) await setState(db, "last_full_scan_at", now());
   return { runId: run.id, status, scanned: boards.length, fetched, inserted, updated, failed, remaining, since };
-}
-
-/**
- * What the Worker cron runs every 15 minutes: a small slice of validation plus up to 100 boards that are
- * due (productive boards after 2 hours, quiet boards after 24 hours), so new postings show up within hours.
- */
-export async function runScheduledMaintenance() {
-  const db = getDb();
-  await ensureDefaultSources(db);
-  // Once a day, ask Google (via Serper) for company boards we do not know yet. ~80 credits per day.
-  const lastDiscovery = await getState(db, "last_discovery_at");
-  const discoveryDue = discoveryConfigured() && (!lastDiscovery || Date.now() - new Date(lastDiscovery).getTime() > 23 * 60 * 60 * 1000);
-  const discovery = discoveryDue ? await discoverNewBoards() : null;
-  const validation = await validatePendingSources(discovery?.newSources ? 40 : 15);
-  const since = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-  const scan = await scanBoards({ limit: 100, since, mode: "scheduled", concurrency: 8 });
-  await setState(db, "last_scheduled_run_at", now());
-  return { discovery, validation, scan };
 }
