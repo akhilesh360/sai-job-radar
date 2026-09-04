@@ -13,6 +13,10 @@ type SourceStats = {
   catalogComplete: boolean; lastFullScanAt: string | null; lastScheduledRunAt: string | null; oldestScanAt: string | null;
   discoveryConfigured: boolean; discoveryIntervalHours: number; creditsPerDiscoveryRun: number; lastDiscoveryAt: string | null; lastDiscoveryError: string | null; discoveredBoards: number; serperCreditsUsed: number;
 };
+type DiscoveryResult = {
+  configured: boolean; queries: number; results: number; newSources: number; bumpedBoards: number; unverifiedJobs: number;
+  failed: number; lastError?: string; creditsUsedTotal?: number; finishedAt: string;
+};
 
 // Credits in your Serper account when this dashboard started counting; used for the low-credit warning.
 const SERPER_CREDITS_BOUGHT = 48000;
@@ -78,6 +82,8 @@ export default function Home() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [scanning, setScanning] = useState(false);
   const [notice, setNotice] = useState("");
+  const [googleRunning, setGoogleRunning] = useState(false);
+  const [googleResult, setGoogleResult] = useState<DiscoveryResult | null>(null);
   const stopRequested = useRef(false);
   const scanningRef = useRef(false);
 
@@ -122,11 +128,6 @@ export default function Home() {
     let totalNew = 0, totalRefreshed = 0, boardsScanned = 0;
     try {
       let stats = sourceStats;
-      if (stats?.discoveryConfigured) {
-        setNotice("Step 1/3 · Google search: 96 searches for roles posted in the last 24 hours…");
-        const discovery = await post<{ newSources?: number; bumpedBoards?: number; unverifiedJobs?: number; queries?: number; failed?: number; lastError?: string }>("/api/internal/discover");
-        setNotice(`Google found ${discovery.newSources ?? 0} new companies and fresh postings at ${discovery.bumpedBoards ?? 0} known ones (${discovery.queries ?? 0} searches${discovery.failed ? `, ${discovery.failed} failed` : ""}). Step 2/3 · checking boards…`);
-      }
       if (!stats?.catalogComplete) {
         let offset = stats?.catalogOffset ?? 0, complete = false;
         while (!complete && !stopRequested.current) {
@@ -138,7 +139,7 @@ export default function Home() {
       let remainingPending = Infinity, validated = 0, activeFound = 0;
       const validateSize = { current: 30, max: 30 };
       while (remainingPending > 0 && !stopRequested.current) {
-        setNotice(`Step 2/3 · Checking boards… ${validated.toLocaleString()} checked, ${activeFound.toLocaleString()} live${Number.isFinite(remainingPending) ? `, ${remainingPending.toLocaleString()} left` : ""}`);
+        setNotice(`Step 1/2 · Checking boards… ${validated.toLocaleString()} checked, ${activeFound.toLocaleString()} live${Number.isFinite(remainingPending) ? `, ${remainingPending.toLocaleString()} left` : ""}`);
         const result = await postSlice<{ checked: number; active: number; remaining: number }>("/api/internal/validate-sources", validateSize);
         validated += result.checked; activeFound += result.active; remainingPending = result.remaining;
         if (result.checked === 0) break;
@@ -152,7 +153,7 @@ export default function Home() {
       // Start small: never-scanned boards sort first and can be large. postSlice grows the slice as requests succeed.
       const scanSize = { current: 12, max: 25 };
       while (remaining > 0 && !stopRequested.current) {
-        setNotice(`Step 3/3 · Reading job feeds… ${boardsScanned.toLocaleString()} / ${stats.active.toLocaleString()} boards, ${totalNew} new jobs so far`);
+        setNotice(`Step 2/2 · Reading job feeds… ${boardsScanned.toLocaleString()} / ${stats.active.toLocaleString()} boards, ${totalNew} new jobs so far`);
         const result = await postSlice<{ scanned: number; inserted: number; updated: number; remaining: number; since: string }>("/api/internal/ingest", scanSize, since ? { since } : {});
         since = result.since;
         boardsScanned += result.scanned; totalNew += result.inserted; totalRefreshed += result.updated; remaining = result.remaining;
@@ -172,12 +173,26 @@ export default function Home() {
     }
   };
 
-  const runDiscovery = async () => {
-    setNotice("Asking Google for company boards not in the catalog yet…");
-    const response = await fetch("/api/internal/discover", { method: "POST" });
-    const result = await response.json() as { configured?: boolean; newSources?: number; bumpedBoards?: number; unverifiedJobs?: number; queries?: number; error?: string };
-    setNotice(!response.ok || !result.configured ? (result.error ?? "Google discovery needs a SERPER_API_KEY setting on the site.") : `Google discovery finished: ${result.newSources ?? 0} new companies, ${result.bumpedBoards ?? 0} known boards with fresh postings queued first, ${result.unverifiedJobs ?? 0} unverified jobs added from ${result.queries ?? 0} searches. New companies are scanned on the next auto-scan (or click Scan all boards).`);
-    await loadSourceStats();
+  /** The Google search button: run every discovery query now, then show what came back. Nothing runs Google on a timer. */
+  const runGoogleSearch = async () => {
+    setGoogleRunning(true);
+    setGoogleResult(null);
+    setNotice(`Google search: running ${sourceStats?.creditsPerDiscoveryRun ? "the ATS queries" : "discovery"} for US roles posted in the last 24 hours…`);
+    try {
+      const result = await post<Omit<DiscoveryResult, "finishedAt">>("/api/internal/discover");
+      setGoogleResult({ ...result, finishedAt: new Date().toISOString() });
+      setNotice(result.newSources
+        ? `Google found ${result.newSources} new compan${result.newSources === 1 ? "y" : "ies"} — click “Scan boards” to check them and pull their jobs.`
+        : `Google search finished: ${result.unverifiedJobs} job${result.unverifiedJobs === 1 ? "" : "s"} added to the feed, ${result.bumpedBoards} known board${result.bumpedBoards === 1 ? "" : "s"} queued for a fresh scan.`);
+      if (result.unverifiedJobs) setSource("Google finds");
+    } catch (error) {
+      setNotice(error instanceof ResourceLimitError
+        ? "Google search stopped: the hosting plan's CPU limit was reached (Cloudflare 1102). Try again in a minute."
+        : error instanceof Error && /SERPER_API_KEY|configured/i.test(error.message) ? "Google search needs the SERPER_API_KEY secret on the Worker." : `Google search failed (${error instanceof Error ? error.message : "unknown error"}).`);
+    } finally {
+      await Promise.all([loadJobs(), loadSourceStats()]);
+      setGoogleRunning(false);
+    }
   };
 
   const sendDigest = async () => {
@@ -203,7 +218,7 @@ export default function Home() {
       return (!needle || haystack.includes(needle))
         && statusOk
         && (role === "All roles" || classifyRole(job.title) === role)
-        && (source === "All sources" || job.source === source)
+        && (source === "All sources" || (source === "Google finds" ? job.source.includes("(Google)") : job.source === source))
         && (workplace === "All locations" || job.workplace === workplace)
         && ageHours <= recencyHours[recency];
     }).sort((a, b) => {
@@ -225,21 +240,35 @@ export default function Home() {
       <div className="brand"><span className="brand-mark"><Icon name="radar" /></span><div><strong>Sai Job Radar</strong><span>US data, AI &amp; engineering jobs, one feed</span></div></div>
       <div className="top-actions">
         <span className="live-pill"><i /> {lastScanLabel}</span>
-        <button className="secondary-btn" onClick={() => void runDiscovery()} disabled={scanning}><Icon name="search" /> Google search only</button>
+        <button className="secondary-btn google-btn" onClick={() => void runGoogleSearch()} disabled={scanning || googleRunning}><Icon name="search" /> {googleRunning ? "Searching Google…" : "Google search"}</button>
         <button className="secondary-btn" onClick={() => void sendDigest()}><Icon name="mail" /> Email digest</button>
         {scanning
           ? <button className="primary-btn" onClick={() => { stopRequested.current = true; setNotice("Stopping after the current batch…"); }}><Icon name="stop" /> Stop</button>
-          : <button className="primary-btn" onClick={() => void runFullScan()}><Icon name="refresh" /> Scan now (Google + boards)</button>}
+          : <button className="primary-btn" onClick={() => void runFullScan()} disabled={googleRunning}><Icon name="refresh" /> Scan boards</button>}
       </div>
     </header>
 
     <section className="workspace">
       <div className="page-heading">
-        <div><p className="eyebrow">30-DAY JOB SEARCH</p><h1>Your job command center</h1><p>Only roles posted in the last 24 hours — found by Google search every 3 hours and direct ATS checks every 15 minutes.</p></div>
+        <div><p className="eyebrow">30-DAY JOB SEARCH</p><h1>Your job command center</h1><p>Only roles posted in the last 24 hours — direct ATS checks every 15 minutes, plus Google search whenever you press the button.</p></div>
         <div className="sync-copy"><span>Last refreshed</span><strong>{lastRefresh ? lastRefresh.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Loading…"}</strong><small>{sourceStats ? `${sourceStats.active.toLocaleString()} live boards` : ""}</small></div>
       </div>
 
       {notice && <div className="notice" role="status">{notice}<button onClick={() => setNotice("")} aria-label="Dismiss notification">×</button></div>}
+
+      {googleResult && <section className="google-results" aria-label="Google search results">
+        <div className="google-results-head">
+          <div><h2><Icon name="search" /> Google search results</h2><p>{googleResult.queries} searches · {googleResult.results} results · finished {relativeTime(googleResult.finishedAt)}{googleResult.creditsUsedTotal ? ` · ${googleResult.creditsUsedTotal.toLocaleString()} Serper credits used in total` : ""}</p></div>
+          <button className="secondary-btn" onClick={() => setGoogleResult(null)}>Dismiss</button>
+        </div>
+        <div className="google-results-grid">
+          <article><span>JOBS ADDED TO FEED</span><strong>{googleResult.unverifiedJobs}</strong><small>Postings on boards without an API — shown as “(Google)” in the source column</small></article>
+          <article><span>NEW COMPANIES</span><strong>{googleResult.newSources}</strong><small>{googleResult.newSources ? "Queued as pending boards — run “Scan boards” to check them and pull their jobs" : "Every company board in the results is already in your catalog"}</small></article>
+          <article><span>KNOWN BOARDS WITH FRESH HITS</span><strong>{googleResult.bumpedBoards}</strong><small>Moved to the front of the next scan</small></article>
+          <article className={googleResult.failed ? "warn" : ""}><span>SEARCHES FAILED</span><strong>{googleResult.failed}</strong><small>{googleResult.failed ? googleResult.lastError ?? "Some searches did not return" : "All searches returned"}</small></article>
+        </div>
+        {googleResult.unverifiedJobs > 0 && <p className="google-results-foot">The feed below is filtered to <b>Google finds</b>. <button className="link-btn" onClick={() => setSource("All sources")}>Show all sources</button></p>}
+      </section>}
 
       <div className="stats-grid">
         <article><span>NEW JOBS</span><strong>{newCount}</strong><small>Waiting for your review</small></article>
@@ -258,7 +287,7 @@ export default function Home() {
           <select value={role} onChange={event => setRole(event.target.value)} aria-label="Filter by role"><option>All roles</option>{roleFamilies.map(item => <option key={item}>{item}</option>)}</select>
           <select value={recency} onChange={event => setRecency(event.target.value)} aria-label="Filter by age"><option>1 hour</option><option>6 hours</option><option>12 hours</option><option>24 hours</option></select>
           <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)} aria-label="Filter by status"><option>Open</option><option>All statuses</option>{statuses.map(item => <option key={item}>{item}</option>)}</select>
-          <select value={source} onChange={event => setSource(event.target.value)} aria-label="Filter by source"><option>All sources</option>{sources.map(item => <option key={item}>{item}</option>)}</select>
+          <select value={source} onChange={event => setSource(event.target.value)} aria-label="Filter by source"><option>All sources</option><option>Google finds</option>{sources.map(item => <option key={item}>{item}</option>)}</select>
           <select value={workplace} onChange={event => setWorkplace(event.target.value)} aria-label="Filter by workplace"><option>All locations</option><option>Remote</option><option>Hybrid</option><option>Onsite</option></select>
           <select value={sort} onChange={event => setSort(event.target.value)} aria-label="Sort jobs"><option>Newest first</option><option>Oldest first</option></select>
         </div>
@@ -279,7 +308,7 @@ export default function Home() {
               })}
             </tbody>
           </table>
-          {filtered.length === 0 && <div className="empty-state"><Icon name="search" /><h3>{jobs.length === 0 ? "No jobs yet" : "No jobs match these filters"}</h3><p>{jobs.length === 0 ? "Click “Scan now” to run the Google search and read every company board." : "Clear a filter or pick a longer time range."}</p></div>}
+          {filtered.length === 0 && <div className="empty-state"><Icon name="search" /><h3>{jobs.length === 0 ? "No jobs yet" : "No jobs match these filters"}</h3><p>{jobs.length === 0 ? "Click “Scan boards” to read every job board, or “Google search” to find new companies and fresh postings." : "Clear a filter or pick a longer time range."}</p></div>}
         </div>
       </section>
       <footer className="footer-note"><span><i className="healthy" /> US roles only • Jobs that leave a board are marked Closed automatically</span><span>{sourceStats?.lastScheduledRunAt ? `Auto-scan last ran ${relativeTime(sourceStats.lastScheduledRunAt)}` : "Auto-scan (every 15 min) has not run yet"}{sourceStats && (sourceStats.discoveryConfigured ? ` • Google discovery every ${sourceStats.discoveryIntervalHours}h (${sourceStats.creditsPerDiscoveryRun} credits/run) ${sourceStats.lastDiscoveryAt ? `last ran ${relativeTime(sourceStats.lastDiscoveryAt)}` : "pending"}, ${sourceStats.discoveredBoards} companies found, ${sourceStats.serperCreditsUsed.toLocaleString()} Serper credits used${SERPER_CREDITS_BOUGHT - sourceStats.serperCreditsUsed < 5000 ? ` ⚠ only ~${Math.max(0, SERPER_CREDITS_BOUGHT - sourceStats.serperCreditsUsed).toLocaleString()} credits left — top up at serper.dev` : ` (~${Math.max(0, SERPER_CREDITS_BOUGHT - sourceStats.serperCreditsUsed).toLocaleString()} left)`}${sourceStats.lastDiscoveryError ? ` • last run: ${sourceStats.lastDiscoveryError}` : ""}` : " • Google discovery off (add SERPER_API_KEY)")}</span></footer>

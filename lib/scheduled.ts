@@ -7,18 +7,21 @@ import { getState, setState } from "./state";
 
 /**
  * What the Worker cron runs every 15 minutes:
- *   1. Google discovery when it is due (default every 3 hours, DISCOVERY_INTERVAL_HOURS to change) — finds
- *      new company boards, bumps boards with fresh hits, and adds unverified jobs from unsupported ATSs.
+ *   1. Google discovery — only when AUTO_DISCOVERY is on. It is off: Google runs from the dashboard's
+ *      "Google search" button instead, so Serper credits are spent only when you ask.
  *   2. Validate pending boards (newly discovered ones first).
  *   3. Scan boards that are due: bumped/new boards first, then productive boards older than 2 hours,
  *      then quiet boards older than a day.
  */
+/** Set to true to let the cron run Google discovery every DISCOVERY_INTERVAL_HOURS (default 3) on its own. */
+const AUTO_DISCOVERY = false;
+
 export async function runScheduledMaintenance() {
   const db = getDb();
   await ensureDefaultSources(db);
   const lastDiscovery = await getState(db, "last_discovery_at");
   const intervalMs = discoveryIntervalHours() * 60 * 60 * 1000;
-  const discoveryDue = discoveryConfigured() && (!lastDiscovery || Date.now() - new Date(lastDiscovery).getTime() > intervalMs - 5 * 60 * 1000);
+  const discoveryDue = AUTO_DISCOVERY && discoveryConfigured() && (!lastDiscovery || Date.now() - new Date(lastDiscovery).getTime() > intervalMs - 5 * 60 * 1000);
   const discovery = discoveryDue ? await discoverNewBoards() : null;
   const validation = await validatePendingSources(discovery?.newSources ? 40 : 15);
   const since = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();

@@ -1,6 +1,6 @@
 import { discoverNewBoards } from "../../../../lib/discovery";
 
-/** Run Google company-board discovery now (the scheduled run does this once a day on its own). */
+/** Run Google company-board discovery now. This is the only trigger: the cron does not run Google on its own. */
 export async function POST() {
   try {
     const result = await discoverNewBoards();
