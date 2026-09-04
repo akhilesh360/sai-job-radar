@@ -88,6 +88,7 @@ async function upsertBoardJobs(db: Db, source: SourceRow, found: CanonicalJob[],
       set: {
         title: sql`excluded.title`, company: sql`excluded.company`, location: sql`excluded.location`, workplace: sql`excluded.workplace`,
         sourceUrl: sql`excluded.source_url`, applyUrl: sql`excluded.apply_url`, postedAt: sql`excluded.posted_at`, lastSeenAt: sql`excluded.last_seen_at`,
+        salary: sql`COALESCE(excluded.salary, ${jobs.salary})`,
         // A job we auto-closed earlier that is back on the board becomes New again; statuses you set stay.
         status: sql`CASE WHEN ${jobs.status} = 'Closed' THEN 'New' ELSE ${jobs.status} END`,
       },

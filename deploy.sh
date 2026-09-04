@@ -35,7 +35,7 @@ printf 'D1_DATABASE_NAME=%s\nD1_DATABASE_ID=%s\n' "$DB_NAME" "$DB_ID" > .env
 echo "Database id: $DB_ID (saved to .env)"
 
 say "Creating tables (migrations are idempotent)"
-for f in drizzle/0000_*.sql drizzle/0001_*.sql drizzle/0002_*.sql drizzle/0003_*.sql; do
+for f in drizzle/*.sql; do
   npx wrangler d1 execute "$DB_NAME" --remote --file "$f" -y >/dev/null 2>&1 || npx wrangler d1 execute "$DB_NAME" --remote --file "$f" -y || true
 done
 

@@ -1,4 +1,4 @@
-import { and, eq, like, lt } from "drizzle-orm";
+import { and, eq, inArray, like, lt } from "drizzle-orm";
 import { getDb } from "../db";
 import { jobs } from "../db/schema";
 import { discoverNewBoards, discoveryConfigured, discoveryIntervalHours } from "./discovery";
@@ -29,6 +29,9 @@ export async function runScheduledMaintenance() {
   const scan = await scanBoards({ limit: 400, since, mode: "scheduled", concurrency: 8 });
   // Unverified (Google-only) jobs are never re-checked, so drop the ones older than 48 hours.
   await db.delete(jobs).where(and(like(jobs.source, "%(Google)%"), lt(jobs.discoveredAt, new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()), eq(jobs.status, "New")));
+  // Rows that came from an aggregator for a board we do not read have no scan to close them; anything no source has
+  // seen for three days is closed (boards are re-read at least daily, so live jobs never get here).
+  await db.update(jobs).set({ status: "Closed" }).where(and(inArray(jobs.status, ["New", "Saved"]), lt(jobs.lastSeenAt, new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())));
   await setState(db, "last_scheduled_run_at", new Date().toISOString());
   return { discovery, validation, scan };
 }

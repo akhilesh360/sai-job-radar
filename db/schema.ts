@@ -12,6 +12,7 @@ export const jobs = sqliteTable("jobs", {
   externalJobId: text("external_job_id"),
   sourceUrl: text("source_url").notNull(),
   applyUrl: text("apply_url").notNull(),
+  salary: text("salary"),
   postedAt: text("posted_at"),
   discoveredAt: text("discovered_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   lastSeenAt: text("last_seen_at").notNull().default(sql`CURRENT_TIMESTAMP`),

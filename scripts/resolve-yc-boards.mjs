@@ -63,6 +63,6 @@ await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 
 const byAts = {}; for (const b of found) byAts[b.ats] = (byAts[b.ats] ?? 0) + 1;
 console.error(`done: ${found.length} boards (${JSON.stringify(byAts)}), ${misses.length} companies not on a readable ATS`);
-writeFileSync("data/source-seeds-9.json", JSON.stringify(found.map(({ jobs, batch, ...seed }) => seed)));
+writeFileSync("data/source-seeds-9.json", JSON.stringify(found.map(b => ({ id: b.id, ats: b.ats, slug: b.slug, companyName: b.companyName, boardUrl: b.boardUrl, origin: b.origin }))));
 writeFileSync(new URL("../.wrangler/yc-resolver-report.json", import.meta.url), JSON.stringify({ found, misses }, null, 1));
 console.error("wrote data/source-seeds-9.json");

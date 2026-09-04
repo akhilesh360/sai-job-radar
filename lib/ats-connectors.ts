@@ -4,14 +4,14 @@ import { isUsLocation, workplaceType } from "./locations";
 export type SourceBoard = { id: string; ats: string; slug: string; companyName: string };
 export type CanonicalJob = {
   id: string; canonicalKey: string; title: string; company: string; location: string; workplace: string;
-  source: string; externalJobId: string; sourceUrl: string; applyUrl: string; postedAt: string | null;
+  source: string; externalJobId: string; sourceUrl: string; applyUrl: string; salary: string | null; postedAt: string | null;
   discoveredAt: string; lastSeenAt: string; status: string; isSeed: boolean;
 };
 
 type Raw = Record<string, unknown>;
 
 // Every connector below is a public JSON endpoint, no credentials and no HTML scraping.
-export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling", "BambooHR", "JobScore", "Oracle"];
+export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling", "BambooHR", "JobScore", "Oracle", "AI Jobs"];
 
 export function boardKeyPrefix(source: SourceBoard) {
   return `${source.ats}:${source.slug}:`.toLowerCase().replace(/[^a-z0-9:]+/g, "-");
@@ -27,10 +27,10 @@ function iso(value: unknown): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-function canonical(source: SourceBoard, id: string, title: string, location: string, applyUrl: string, postedAt: unknown): CanonicalJob {
+function canonical(source: SourceBoard, id: string, title: string, location: string, applyUrl: string, postedAt: unknown, salary: string | null = null): CanonicalJob {
   const now = new Date().toISOString(), jobKey = key(source, id);
   const cleanTitle = title.replace(/\s+/g, " ").trim(), cleanLocation = location.replace(/\s+/g, " ").trim();
-  return { id: jobKey, canonicalKey: jobKey, title: cleanTitle, company: source.companyName, location: cleanLocation, workplace: workplaceType(cleanLocation), source: source.ats, externalJobId: id, sourceUrl: applyUrl, applyUrl, postedAt: iso(postedAt), discoveredAt: now, lastSeenAt: now, status: "New", isSeed: false };
+  return { id: jobKey, canonicalKey: jobKey, title: cleanTitle, company: source.companyName, location: cleanLocation, workplace: workplaceType(cleanLocation), source: source.ats, externalJobId: id, sourceUrl: applyUrl, applyUrl, salary, postedAt: iso(postedAt), discoveredAt: now, lastSeenAt: now, status: "New", isSeed: false };
 }
 
 function keep(title: string, location: string) {
@@ -51,6 +51,25 @@ async function json<T>(url: string): Promise<T> {
 
 const str = (value: unknown) => (value === null || value === undefined ? "" : String(value));
 const joinParts = (...parts: unknown[]) => parts.map(str).map(part => part.trim()).filter(Boolean).join(", ");
+
+/**
+ * When an aggregator hands us a link into a board we read directly, key the job exactly as that connector would, so the
+ * two sources merge into one row instead of duplicating it. Returns null for hosts we do not read.
+ */
+function atsKeyFromUrl(rawUrl: string): { id: string; ats: string; slug: string; jobId: string } | null {
+  try {
+    const url = new URL(rawUrl), host = url.hostname.toLowerCase(), parts = url.pathname.split("/").filter(Boolean).map(part => decodeURIComponent(part));
+    let ats = "", slug = "", jobId = "";
+    if (/(^|\.)greenhouse\.io$/.test(host) && parts[1] === "jobs" && parts[2]) [ats, slug, jobId] = ["Greenhouse", parts[0], parts[2]];
+    else if (host === "jobs.ashbyhq.com" && parts[1]) [ats, slug, jobId] = ["Ashby", parts[0], parts[1]];
+    else if (host === "jobs.lever.co" && parts[1]) [ats, slug, jobId] = ["Lever", parts[0], parts[1]];
+    else return null;
+    if (!/^(?:\d+|[0-9a-f]{8}-[0-9a-f-]{27})$/i.test(jobId)) return null;
+    return { id: `${ats}:${slug}`.toLowerCase(), ats, slug, jobId };
+  } catch {
+    return null;
+  }
+}
 
 export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[]> {
   const slug = encodeURIComponent(source.slug.trim());
@@ -202,6 +221,34 @@ export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[
       const id = str(raw.Id) || title;
       return [canonical(source, id, title, location, `${sitePath}/job/${id}`, raw.PostedDate)];
     });
+  }
+
+  if (source.ats === "AI Jobs") {
+    // artificialintelligencejobs.co reads 260+ companies' own career pages; its free API lists US roles newest first,
+    // 200 per page, about a quarter of them with a salary range. Rows that link into a Greenhouse/Ashby/Lever board are
+    // keyed like that connector's rows (merging, and adding salary); the rest — Amazon, company career sites — become
+    // "AI Jobs" rows of their own. Workday links are skipped by request.
+    const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+    const out: CanonicalJob[] = [];
+    for (let page = 0; page < 20; page++) {
+      const data = await json<{ jobs?: Raw[] }>(`https://artificialintelligencejobs.co/api/jobs?region=us&limit=200&offset=${page * 200}`);
+      const rows = data.jobs ?? [];
+      if (!rows.length) break;
+      let stale = false;
+      for (const raw of rows) {
+        const postedAt = iso(raw.posted);
+        if (postedAt && new Date(postedAt).getTime() < cutoff) { stale = true; continue; }
+        const title = str(raw.title), location = str(raw.location) || (raw.remote ? "Remote" : "");
+        if (!keep(title, location)) continue;
+        const applyUrl = str(raw.apply_url) || str(raw.url);
+        if (!applyUrl || /myworkdayjobs\.com/i.test(applyUrl)) continue;
+        const mapped = atsKeyFromUrl(applyUrl);
+        const board: SourceBoard = mapped ? { id: mapped.id, ats: mapped.ats, slug: mapped.slug, companyName: str(raw.company) || mapped.slug } : { ...source, companyName: str(raw.company) || source.companyName };
+        out.push(canonical(board, mapped ? mapped.jobId : applyUrl.replace(/^https?:\/\//, ""), title, location, applyUrl, raw.posted, str(raw.salary) || null));
+      }
+      if (stale) break;
+    }
+    return out;
   }
 
   throw new Error(`${source.ats} boards are not supported`);
