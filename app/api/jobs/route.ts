@@ -1,6 +1,7 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { jobs } from "../../../db/schema";
+import { h1bSponsors, jobs } from "../../../db/schema";
+import { employerKey, matchSponsor, normalizeEmployer, type SponsorRow } from "../../../lib/h1b";
 
 const jobStatuses = ["New", "Saved", "Applied", "Interview", "Rejected", "Archived", "Closed"] as const;
 
@@ -10,7 +11,15 @@ export async function GET() {
     // Earlier versions inserted fake placeholder jobs; make sure none linger in the feed.
     await db.delete(jobs).where(eq(jobs.isSeed, true));
     const rows = await db.select().from(jobs).orderBy(desc(jobs.postedAt), desc(jobs.discoveredAt)).limit(2000);
-    return Response.json({ jobs: rows });
+    // H-1B sponsorship: look up every distinct first token once, then match each company against its candidates.
+    const keys = [...new Set(rows.map(row => employerKey(normalizeEmployer(row.company))).filter(Boolean))];
+    const byKey = new Map<string, SponsorRow[]>();
+    for (let index = 0; index < keys.length; index += 90) {
+      const found = await db.select().from(h1bSponsors).where(inArray(h1bSponsors.key1, keys.slice(index, index + 90)));
+      for (const row of found) byKey.set(row.key1, [...(byKey.get(row.key1) ?? []), row]);
+    }
+    const withSponsor = rows.map(row => ({ ...row, h1b: matchSponsor(row.company, byKey.get(employerKey(normalizeEmployer(row.company))) ?? []) }));
+    return Response.json({ jobs: withSponsor });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to load jobs" }, { status: 500 });
   }

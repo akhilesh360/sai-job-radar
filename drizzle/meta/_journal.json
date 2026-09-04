@@ -36,6 +36,13 @@
       "when": 1788900000000,
       "tag": "0004_job_salary",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1788910000000,
+      "tag": "0005_h1b_sponsors",
+      "breakpoints": true
     }
   ]
 }

@@ -105,3 +105,13 @@ npx wrangler deploy --config dist/rsc/wrangler.json
   the build was made without `triggers` (check `vite.config.ts`) — rebuild and redeploy.
 - **Google discovery says "off"** → `SERPER_API_KEY` is not set on the Worker (step 5).
 - **Local dev**: `npm run dev` uses a local D1 automatically; no `.env` needed.
+
+## H-1B sponsor data
+
+The dashboard's "H-1B ✓" badge and "H-1B sponsors only" filter come from the USCIS H-1B Employer Data Hub. Load (or
+refresh) the table after the migrations have run:
+
+```bash
+node scripts/load-h1b-sponsors.mjs 2023 2022          # newest fiscal years available on uscis.gov
+npx wrangler d1 execute sai-job-radar --remote --file data/h1b-sponsors.sql -y
+```

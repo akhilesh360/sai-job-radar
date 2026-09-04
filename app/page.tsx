@@ -7,6 +7,7 @@ type Status = "New" | "Saved" | "Applied" | "Interview" | "Rejected" | "Archived
 type Job = {
   id: string; title: string; company: string; location: string; workplace: "Remote" | "Hybrid" | "Onsite" | "Unknown";
   source: string; salary: string | null; postedAt: string | null; discoveredAt: string; lastSeenAt: string; applyUrl: string; status: Status;
+  h1b: { name: string; approvals: number; fiscalYear: number; exact: boolean } | null;
 };
 type SourceStats = {
   total: number; active: number; pending: number; invalid: number; errored: number; seedCatalogSize: number; catalogOffset: number;
@@ -94,6 +95,7 @@ export default function Home() {
   const [workplace, setWorkplace] = useState("All locations");
   const [statusFilter, setStatusFilter] = useState("Open");
   const [sort, setSort] = useState("Newest first");
+  const [sponsor, setSponsor] = useState("Any sponsorship");
 
   const loadJobs = async () => {
     const response = await fetch("/api/jobs", { cache: "no-store" });
@@ -220,12 +222,13 @@ export default function Home() {
         && (role === "All roles" || classifyRole(job.title) === role)
         && (source === "All sources" || (source === "Google finds" ? job.source.includes("(Google)") : job.source === source))
         && (workplace === "All locations" || job.workplace === workplace)
+        && (sponsor === "Any sponsorship" || job.h1b !== null)
         && ageHours <= recencyHours[recency];
     }).sort((a, b) => {
       const av = new Date(a.postedAt ?? a.discoveredAt).getTime(), bv = new Date(b.postedAt ?? b.discoveredAt).getTime();
       return sort === "Newest first" ? bv - av : av - bv;
     });
-  }, [jobs, query, role, source, workplace, recency, statusFilter, sort, now]);
+  }, [jobs, query, role, source, workplace, recency, statusFilter, sort, sponsor, now]);
 
   const openJobs = jobs.filter(job => !closedStatuses.includes(job.status));
   const newCount = openJobs.filter(job => job.status === "New").length;
@@ -289,6 +292,7 @@ export default function Home() {
           <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)} aria-label="Filter by status"><option>Open</option><option>All statuses</option>{statuses.map(item => <option key={item}>{item}</option>)}</select>
           <select value={source} onChange={event => setSource(event.target.value)} aria-label="Filter by source"><option>All sources</option><option>Google finds</option>{sources.map(item => <option key={item}>{item}</option>)}</select>
           <select value={workplace} onChange={event => setWorkplace(event.target.value)} aria-label="Filter by workplace"><option>All locations</option><option>Remote</option><option>Hybrid</option><option>Onsite</option></select>
+          <select value={sponsor} onChange={event => setSponsor(event.target.value)} aria-label="Filter by visa sponsorship"><option>Any sponsorship</option><option>H-1B sponsors only</option></select>
           <select value={sort} onChange={event => setSort(event.target.value)} aria-label="Sort jobs"><option>Newest first</option><option>Oldest first</option></select>
         </div>
         <div className="table-wrap">
@@ -298,7 +302,7 @@ export default function Home() {
               {filtered.map(job => {
                 const isNew = now - new Date(job.discoveredAt).getTime() < 86400000;
                 return <tr key={job.id}>
-                  <td><div className="role-cell"><span className="company-avatar">{job.company.slice(0, 2).toUpperCase()}</span><div><strong>{job.title}</strong><span>{job.company} · {classifyRole(job.title) ?? "Engineering"} · {seniority(job.title)}{job.salary && <> · <b className="salary">{job.salary}</b></>}{isNew && <em>NEW</em>}{job.source.includes("(Google)") && <em className="unverified">UNVERIFIED</em>}</span></div></div></td>
+                  <td><div className="role-cell"><span className="company-avatar">{job.company.slice(0, 2).toUpperCase()}</span><div><strong>{job.title}</strong><span>{job.company} · {classifyRole(job.title) ?? "Engineering"} · {seniority(job.title)}{job.salary && <> · <b className="salary">{job.salary}</b></>}{job.h1b && <em className="h1b" title={`${job.h1b.name} — ${job.h1b.approvals.toLocaleString()} H-1B approvals (FY${job.h1b.fiscalYear}, USCIS Employer Data Hub${job.h1b.exact ? "" : "; matched by name prefix"})`}>H-1B ✓ {job.h1b.approvals.toLocaleString()}</em>}{isNew && <em>NEW</em>}{job.source.includes("(Google)") && <em className="unverified">UNVERIFIED</em>}</span></div></div></td>
                   <td><strong className="plain-strong">{job.location}</strong><span className={`workplace ${job.workplace.toLowerCase()}`}>{job.workplace}</span></td>
                   <td><span className="source-pill">{job.source}</span></td>
                   <td><strong className="time-main">{job.postedAt ? `Posted ${relativeTime(job.postedAt)}` : "Post date unknown"}</strong><span className="time-sub">Found {relativeTime(job.discoveredAt)} · Seen {relativeTime(job.lastSeenAt)}</span></td>

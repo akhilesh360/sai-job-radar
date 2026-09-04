@@ -118,3 +118,4 @@ body{margin:0;background:#eef3f6;color:var(--ink);font-family:Inter,ui-sans-seri
 @media (max-width:900px){.google-results-grid{grid-template-columns:repeat(2,1fr)}}
 
 .role-cell .salary{color:var(--green);font-weight:600}
+.role-cell em.h1b{background:#e8f1fb;color:#1f4e8c;border:1px solid #c5d9f1}

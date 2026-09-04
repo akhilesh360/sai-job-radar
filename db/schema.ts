@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const jobs = sqliteTable("jobs", {
   id: text("id").primaryKey(),
@@ -130,3 +130,13 @@ export const systemState = sqliteTable("system_state", {
   value: text("value").notNull(),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+/** Employers that petitioned for H-1B workers (USCIS Employer Data Hub), aggregated by normalized name. */
+export const h1bSponsors = sqliteTable("h1b_sponsors", {
+  nameNorm: text("name_norm").primaryKey(),
+  name: text("name").notNull(),
+  key1: text("key1").notNull(),
+  fiscalYear: integer("fiscal_year").notNull(),
+  approvals: integer("approvals").notNull(),
+  state: text("state"),
+}, (table) => [index("h1b_sponsors_key1_idx").on(table.key1)]);
