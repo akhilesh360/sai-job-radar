@@ -13,15 +13,22 @@ node -e 'const [maj,min]=process.versions.node.split(".").map(Number); if (maj<2
 
 say "Installing dependencies"
 [ -d node_modules ] || npm ci --no-audit --no-fund
+# Newer npm skips packages' install scripts until approved; esbuild/workerd need theirs to run.
+npm install-scripts approve esbuild workerd sharp unrs-resolver fsevents >/dev/null 2>&1 || true
+npm rebuild esbuild workerd >/dev/null 2>&1 || true
 
 say "Logging in to Cloudflare (a browser window opens the first time)"
-npx wrangler whoami >/dev/null 2>&1 || npx wrangler login
+if npx wrangler whoami 2>&1 | grep -qi "not authenticated"; then
+  npx wrangler login
+fi
+npx wrangler whoami 2>&1 | grep -qi "not authenticated" && { echo "Cloudflare login did not complete. Run 'npx wrangler login' and then re-run this script."; exit 1; }
 
 say "Creating the D1 database '$DB_NAME' (skipped if it exists)"
-DB_ID="$(npx wrangler d1 list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const r=JSON.parse(s).find(d=>d.name===process.argv[1]);process.stdout.write(r?r.uuid:"")}catch{}})' "$DB_NAME")"
+find_db_id() { npx wrangler d1 list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const r=JSON.parse(s).find(d=>d.name===process.argv[1]);process.stdout.write(r?r.uuid:"")}catch{}})' "$DB_NAME" || true; }
+DB_ID="$(find_db_id)"
 if [ -z "$DB_ID" ]; then
-  npx wrangler d1 create "$DB_NAME" >/dev/null
-  DB_ID="$(npx wrangler d1 list --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s).find(d=>d.name===process.argv[1]);process.stdout.write(r?r.uuid:"")})' "$DB_NAME")"
+  npx wrangler d1 create "$DB_NAME" || true
+  DB_ID="$(find_db_id)"
 fi
 [ -n "$DB_ID" ] || { echo "Could not determine the D1 database id. Run 'npx wrangler d1 list' and check."; exit 1; }
 printf 'D1_DATABASE_NAME=%s\nD1_DATABASE_ID=%s\n' "$DB_NAME" "$DB_ID" > .env
