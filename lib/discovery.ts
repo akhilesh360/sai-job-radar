@@ -36,6 +36,12 @@ const atsHosts: Array<{ ats: string; hosts: string[]; supported: boolean }> = [
   { ats: "Jobvite", hosts: ["jobs.jobvite.com"], supported: false },
   { ats: "JazzHR", hosts: ["applytojob.com"], supported: false },
   { ats: "Teamtailor", hosts: ["jobs.teamtailor.com"], supported: false },
+  // Enterprise suites without public feeds: search-only, results land as "<ATS> (Google)" jobs and expire after 48 h.
+  { ats: "Taleo", hosts: ["taleo.net"], supported: false },
+  { ats: "SuccessFactors", hosts: ["successfactors.com"], supported: false },
+  { ats: "UKG", hosts: ["ultipro.com"], supported: false },
+  { ats: "Phenom", hosts: ["phenompro.com"], supported: false },
+  { ats: "Eightfold", hosts: ["eightfold.ai"], supported: false },
   { ats: "BambooHR", hosts: ["bamboohr.com"], supported: true },
   { ats: "JobScore", hosts: ["careers.jobscore.com"], supported: true },
 ];
@@ -75,7 +81,9 @@ export function parseSourceUrl(rawUrl: string, origin = "google-discovery"): Par
     const match = atsHosts.find(item => item.hosts.some(value => host === value || host.endsWith(`.${value}`)));
     if (!match) return null;
     let slug = parts[0] ?? "";
-    if (["Recruitee", "Breezy", "Pinpoint", "Teamtailor", "BambooHR", "iCIMS"].includes(match.ats)) slug = host.split(".")[0];
+    if (["Recruitee", "Breezy", "Pinpoint", "Teamtailor", "BambooHR", "iCIMS", "Taleo", "Phenom", "Eightfold"].includes(match.ats)) slug = host.split(".")[0];
+    // SuccessFactors career sites share a few hosts (career5.successfactors.com, …) and identify the employer by ?company=.
+    if (match.ats === "SuccessFactors") slug = url.searchParams.get("company") ?? host.split(".")[0];
     // JobScore URLs are careers.jobscore.com/careers/<company>/... or /jobs/<company>/feed.json.
     if (match.ats === "JobScore") slug = ["careers", "jobs"].includes((parts[0] ?? "").toLowerCase()) ? parts[1] ?? "" : "";
     if (!slug || ["embed", "jobs", "job", "careers", "apply", "j", "o", "p", "www"].includes(slug.toLowerCase())) return null;
