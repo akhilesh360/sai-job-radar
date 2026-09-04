@@ -77,14 +77,23 @@ export function parseSourceUrl(rawUrl: string, origin = "google-discovery"): Par
 type SerperItem = { title?: string; link?: string; snippet?: string; date?: string };
 type SerperResponse = { organic?: SerperItem[] };
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Serper rate-limits bursts; run a few at a time and retry 429/5xx with backoff.
 async function serperSearch(key: string, plan: { domain: string; phrases: string[]; num: number }) {
-  const response = await fetch("https://google.serper.dev/search", {
-    method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json", "x-api-key": key },
-    body: JSON.stringify({ q: `site:${plan.domain} (${plan.phrases.map(phrase => `"${phrase}"`).join(" OR ")})`, gl: "us", hl: "en", tbs: "qdr:d", num: plan.num }),
-  });
-  if (!response.ok) throw new Error(`Serper ${response.status}`);
-  return response.json() as Promise<SerperResponse>;
+  let lastError = "";
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt) await sleep(700 * attempt);
+    const response = await fetch("https://google.serper.dev/search", {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json", "x-api-key": key },
+      body: JSON.stringify({ q: `site:${plan.domain} (${plan.phrases.map(phrase => `"${phrase}"`).join(" OR ")})`, gl: "us", hl: "en", tbs: "qdr:d", num: plan.num }),
+    });
+    if (response.ok) return response.json() as Promise<SerperResponse>;
+    lastError = `Serper ${response.status} ${(await response.text().catch(() => "")).slice(0, 120)}`;
+    if (response.status !== 429 && response.status < 500) break;
+  }
+  throw new Error(lastError || "Serper request failed");
 }
 
 function normalizeUrl(raw: string) {
@@ -116,16 +125,16 @@ export async function discoverNewBoards() {
   const db = getDb();
   const [run] = await db.insert(discoveryRuns).values({ status: "running" }).returning();
   const existing = new Set((await db.select({ id: sourceBoards.id }).from(sourceBoards)).map(row => row.id));
-  let queries = 0, results = 0, failed = 0, credits = 0;
+  let queries = 0, results = 0, failed = 0, credits = 0, lastError = "";
   const newBoards = new Map<string, ParsedSource>();
   const seenBoards = new Set<string>();
   const unverified = new Map<string, typeof jobs.$inferInsert>();
   const now = new Date().toISOString();
 
-  for (let index = 0; index < plans.length; index += 8) {
-    await Promise.all(plans.slice(index, index + 8).map(async plan => {
+  for (let index = 0; index < plans.length; index += 3) {
+    await Promise.all(plans.slice(index, index + 3).map(async plan => {
       let data: SerperResponse;
-      try { data = await serperSearch(key, plan); queries++; credits += plan.num > 10 ? 2 : 1; } catch { failed++; return; }
+      try { data = await serperSearch(key, plan); queries++; credits += plan.num > 10 ? 2 : 1; } catch (error) { failed++; lastError = error instanceof Error ? error.message : String(error); return; }
       for (const item of data.organic ?? []) {
         results++;
         if (!item.link) continue;
@@ -168,5 +177,6 @@ export async function discoverNewBoards() {
   await setState(db, "last_discovery_at", finished);
   const used = Number(await getState(db, "serper_credits_used") ?? 0) + credits;
   await setState(db, "serper_credits_used", String(used));
-  return { configured: true as const, queries, results, newSources: rows.length, bumpedBoards: bump.length, unverifiedJobs: unverifiedRows.length, failed, creditsUsedTotal: used };
+  if (failed) await setState(db, "last_discovery_error", `${failed} of ${plans.length} searches failed — ${lastError}`); else await setState(db, "last_discovery_error", "");
+  return { configured: true as const, queries, results, newSources: rows.length, bumpedBoards: bump.length, unverifiedJobs: unverifiedRows.length, failed, lastError, creditsUsedTotal: used };
 }

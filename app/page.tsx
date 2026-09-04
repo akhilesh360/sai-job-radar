@@ -11,7 +11,7 @@ type Job = {
 type SourceStats = {
   total: number; active: number; pending: number; invalid: number; errored: number; seedCatalogSize: number; catalogOffset: number;
   catalogComplete: boolean; lastFullScanAt: string | null; lastScheduledRunAt: string | null; oldestScanAt: string | null;
-  discoveryConfigured: boolean; discoveryIntervalHours: number; creditsPerDiscoveryRun: number; lastDiscoveryAt: string | null; discoveredBoards: number; serperCreditsUsed: number;
+  discoveryConfigured: boolean; discoveryIntervalHours: number; creditsPerDiscoveryRun: number; lastDiscoveryAt: string | null; lastDiscoveryError: string | null; discoveredBoards: number; serperCreditsUsed: number;
 };
 
 const statuses: Status[] = ["New", "Saved", "Applied", "Interview", "Rejected", "Archived", "Closed"];
@@ -244,7 +244,7 @@ export default function Home() {
           {filtered.length === 0 && <div className="empty-state"><Icon name="search" /><h3>{jobs.length === 0 ? "No jobs yet" : "No jobs match these filters"}</h3><p>{jobs.length === 0 ? "Click “Scan all boards” to pull live openings from every company board." : "Clear a filter or pick a longer time range."}</p></div>}
         </div>
       </section>
-      <footer className="footer-note"><span><i className="healthy" /> US roles only • Jobs that leave a board are marked Closed automatically</span><span>{sourceStats?.lastScheduledRunAt ? `Auto-scan last ran ${relativeTime(sourceStats.lastScheduledRunAt)}` : "Auto-scan (every 15 min) has not run yet"}{sourceStats && (sourceStats.discoveryConfigured ? ` • Google discovery every ${sourceStats.discoveryIntervalHours}h (${sourceStats.creditsPerDiscoveryRun} credits/run) ${sourceStats.lastDiscoveryAt ? `last ran ${relativeTime(sourceStats.lastDiscoveryAt)}` : "pending"}, ${sourceStats.discoveredBoards} companies found, ${sourceStats.serperCreditsUsed.toLocaleString()} Serper credits used` : " • Google discovery off (add SERPER_API_KEY)")}</span></footer>
+      <footer className="footer-note"><span><i className="healthy" /> US roles only • Jobs that leave a board are marked Closed automatically</span><span>{sourceStats?.lastScheduledRunAt ? `Auto-scan last ran ${relativeTime(sourceStats.lastScheduledRunAt)}` : "Auto-scan (every 15 min) has not run yet"}{sourceStats && (sourceStats.discoveryConfigured ? ` • Google discovery every ${sourceStats.discoveryIntervalHours}h (${sourceStats.creditsPerDiscoveryRun} credits/run) ${sourceStats.lastDiscoveryAt ? `last ran ${relativeTime(sourceStats.lastDiscoveryAt)}` : "pending"}, ${sourceStats.discoveredBoards} companies found, ${sourceStats.serperCreditsUsed.toLocaleString()} Serper credits used${sourceStats.lastDiscoveryError ? ` • last run: ${sourceStats.lastDiscoveryError}` : ""}` : " • Google discovery off (add SERPER_API_KEY)")}</span></footer>
     </section>
   </main>;
 }
