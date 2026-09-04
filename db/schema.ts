@@ -17,6 +17,11 @@ export const jobs = sqliteTable("jobs", {
   fitScore: integer("fit_score"),
   fitReason: text("fit_reason"),
   fitScoredAt: text("fit_scored_at"),
+  /** From the job description (lib/jd.ts): named tools, minimum years asked for, hard-blocker flags; when we last looked. */
+  jdSkills: text("jd_skills"),
+  jdYears: integer("jd_years"),
+  jdFlags: text("jd_flags"),
+  jdFetchedAt: text("jd_fetched_at"),
   postedAt: text("posted_at"),
   discoveredAt: text("discovered_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   lastSeenAt: text("last_seen_at").notNull().default(sql`CURRENT_TIMESTAMP`),

@@ -57,6 +57,13 @@
       "when": 1788930000000,
       "tag": "0007_job_fit",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788940000000,
+      "tag": "0008_job_jd",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,8 @@ export type CanonicalJob = {
   id: string; canonicalKey: string; title: string; company: string; location: string; workplace: string;
   source: string; externalJobId: string; sourceUrl: string; applyUrl: string; salary: string | null; postedAt: string | null;
   discoveredAt: string; lastSeenAt: string; status: string; isSeed: boolean;
+  /** Description text when the board payload carries it (Ashby, Lever, Pinpoint, Recruitee, Breezy). Not stored as-is. */
+  jdText?: string;
 };
 
 type Raw = Record<string, unknown>;
@@ -71,6 +73,36 @@ function atsKeyFromUrl(rawUrl: string): { id: string; ats: string; slug: string;
   }
 }
 
+/**
+ * Fetch one job's description for boards whose list payload lacks it. Returns null when the ATS has no per-job endpoint
+ * we can read (Rippling, Oracle, aggregator rows) or the job is gone. Used by the fit scorer, at most once per job.
+ */
+export async function fetchJobDescription(job: { source: string; applyUrl: string; externalJobId: string | null }): Promise<string | null> {
+  try {
+    const url = new URL(job.applyUrl), parts = url.pathname.split("/").filter(Boolean).map(part => decodeURIComponent(part));
+    if (job.source === "Greenhouse" && /greenhouse\.io$/.test(url.hostname) && parts[1] === "jobs" && parts[2]) {
+      const data = await json<{ content?: string }>(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(parts[0])}/jobs/${encodeURIComponent(parts[2])}`);
+      return str(data.content) || null;
+    }
+    if (job.source === "Workable" && url.hostname === "apply.workable.com" && parts[1] === "j" && parts[2]) {
+      const data = await json<{ description?: string; requirements?: string }>(`https://apply.workable.com/api/v2/accounts/${encodeURIComponent(parts[0])}/jobs/${encodeURIComponent(parts[2])}`);
+      return [str(data.description), str(data.requirements)].filter(Boolean).join("\n") || null;
+    }
+    if (job.source === "SmartRecruiters" && url.hostname === "jobs.smartrecruiters.com" && parts[0] && parts[1]) {
+      const data = await json<{ jobAd?: { sections?: Record<string, { text?: string }> } }>(`https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(parts[0])}/postings/${encodeURIComponent(parts[1].split("-")[0])}`);
+      const sections = data.jobAd?.sections ?? {};
+      return [sections.jobDescription?.text, sections.qualifications?.text, sections.additionalInformation?.text].map(str).filter(Boolean).join("\n") || null;
+    }
+    if (job.source === "BambooHR" && /\.bamboohr\.com$/.test(url.hostname) && parts[0] === "careers" && parts[1]) {
+      const data = await json<{ result?: { jobOpening?: { description?: string } } }>(`https://${url.hostname}/careers/${encodeURIComponent(parts[1])}/detail`);
+      return str(data.result?.jobOpening?.description) || null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[]> {
   const slug = encodeURIComponent(source.slug.trim());
 
@@ -83,7 +115,7 @@ export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[
       const location = [str(raw.location), ...secondary].filter(Boolean).join("; ") || (raw.isRemote ? "Remote" : "");
       if (!keep(title, location)) return [];
       const id = str(raw.id) || str(raw.jobUrl) || title;
-      return [canonical(source, id, title, location, str(raw.jobUrl) || str(raw.applyUrl) || `https://jobs.ashbyhq.com/${source.slug}`, raw.publishedAt)];
+      return [{ ...canonical(source, id, title, location, str(raw.jobUrl) || str(raw.applyUrl) || `https://jobs.ashbyhq.com/${source.slug}`, raw.publishedAt), jdText: str(raw.descriptionPlain) || str(raw.descriptionHtml) || undefined }];
     });
   }
 
@@ -104,7 +136,8 @@ export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[
       const location = [str(categories?.location), ...((raw.categories as Raw | undefined)?.allLocations as string[] | undefined ?? [])].filter(Boolean).filter((value, index, all) => all.indexOf(value) === index).join("; ") || (raw.workplaceType === "remote" ? "Remote" : "");
       if (!keep(title, location)) return [];
       const id = str(raw.id) || str(raw.hostedUrl) || title;
-      return [canonical(source, id, title, location, str(raw.hostedUrl) || str(raw.applyUrl) || `https://jobs.lever.co/${source.slug}`, raw.createdAt)];
+      const lists = (raw.lists as Raw[] | undefined ?? []).map(item => `${str(item.text)}\n${str(item.content)}`).join("\n");
+      return [{ ...canonical(source, id, title, location, str(raw.hostedUrl) || str(raw.applyUrl) || `https://jobs.lever.co/${source.slug}`, raw.createdAt), jdText: [str(raw.descriptionPlain) || str(raw.description), lists, str(raw.additionalPlain) || str(raw.additional)].filter(Boolean).join("\n") || undefined }];
     });
   }
 
@@ -137,7 +170,7 @@ export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[
       const location = joinParts(raw.city, raw.state_code, country) || (raw.remote ? "Remote" : "");
       if (!keep(title, location)) return [];
       const id = str(raw.id) || str(raw.slug) || title;
-      return [canonical({ ...source, companyName: str(raw.company_name) || source.companyName }, id, title, location, str(raw.careers_url) || `https://${source.slug}.recruitee.com/o/${str(raw.slug)}`, raw.published_at)];
+      return [{ ...canonical({ ...source, companyName: str(raw.company_name) || source.companyName }, id, title, location, str(raw.careers_url) || `https://${source.slug}.recruitee.com/o/${str(raw.slug)}`, raw.published_at), jdText: [str(raw.description), str(raw.requirements)].filter(Boolean).join("\n") || undefined }];
     });
   }
 
@@ -148,7 +181,7 @@ export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[
       const location = str(loc?.name) || joinParts(loc?.city, (loc?.state as Raw | undefined)?.name, (loc?.country as Raw | undefined)?.name) || (loc?.is_remote ? "Remote" : "");
       if (!keep(title, location)) return [];
       const id = str(raw.id) || str(raw.friendly_id) || title;
-      return [canonical(source, id, title, location, str(raw.url) || `https://${source.slug}.breezy.hr/p/${str(raw.friendly_id) || id}`, raw.published_date)];
+      return [{ ...canonical(source, id, title, location, str(raw.url) || `https://${source.slug}.breezy.hr/p/${str(raw.friendly_id) || id}`, raw.published_date), jdText: str(raw.description) || undefined }];
     });
   }
 
@@ -159,7 +192,7 @@ export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[
       const location = str(loc?.name) || joinParts(loc?.city, loc?.province, loc?.country) || (raw.workplace_type === "remote" ? "Remote" : "");
       if (!keep(title, location)) return [];
       const rawUrl = str(raw.url) || str(raw.absolute_url), id = str(raw.id) || str(raw.uuid) || title;
-      return [canonical(source, id, title, location, rawUrl || `https://${source.slug}.pinpointhq.com/postings/${id}`, raw.published_at ?? raw.created_at)];
+      return [{ ...canonical(source, id, title, location, rawUrl || `https://${source.slug}.pinpointhq.com/postings/${id}`, raw.published_at ?? raw.created_at), jdText: str(raw.description) || undefined }];
     });
   }
 

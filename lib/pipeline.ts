@@ -5,6 +5,7 @@ import { ingestionRuns, jobs, sourceBoards } from "../db/schema";
 import { boardKeyPrefix, enabledAts, fetchBoardJobs, type CanonicalJob } from "./ats-connectors";
 import { defaultSources } from "./default-sources";
 import { excludedBoardLike } from "./exclusions";
+import { summarizeJd } from "./jd";
 import { setState } from "./state";
 
 type Db = ReturnType<typeof getDb>;
@@ -75,20 +76,33 @@ async function upsertBoardJobs(db: Db, source: SourceRow, found: CanonicalJob[],
   const prefix = boardKeyPrefix(source);
   const keys = found.map(job => job.canonicalKey);
   // D1 allows at most 100 bound parameters per statement, so keys and rows are chunked accordingly.
-  const existingKeys = new Set<string>();
+  const existingKeys = new Set<string>(), needsJd = new Set<string>();
   for (let index = 0; index < keys.length; index += 90) {
-    const rows = await db.select({ canonicalKey: jobs.canonicalKey }).from(jobs).where(inArray(jobs.canonicalKey, keys.slice(index, index + 90)));
-    for (const row of rows) existingKeys.add(row.canonicalKey);
+    const rows = await db.select({ canonicalKey: jobs.canonicalKey, jdFetchedAt: jobs.jdFetchedAt }).from(jobs).where(inArray(jobs.canonicalKey, keys.slice(index, index + 90)));
+    for (const row of rows) { existingKeys.add(row.canonicalKey); if (!row.jdFetchedAt) needsJd.add(row.canonicalKey); }
   }
+  // Description intelligence is extracted for jobs we have not seen before (regexes over a few KB each — cheap per job,
+  // but a 400-board scan would burn CPU re-doing thousands of known ones). The raw text itself is never stored.
+  // Known jobs that predate description extraction are backfilled a few per scan, so it spreads over the cycles.
+  const extractedAt = now();
+  let backfill = 15;
+  const rows = found.map(({ jdText, ...job }) => {
+    if (!jdText) return job;
+    const isNew = !existingKeys.has(job.canonicalKey);
+    if (!isNew && (!needsJd.has(job.canonicalKey) || backfill-- <= 0)) return job;
+    const jd = summarizeJd(jdText.slice(0, 8000));
+    return { ...job, jdSkills: jd.skills.join(", ") || null, jdYears: jd.years, jdFlags: jd.flags.join(",") || null, jdFetchedAt: extractedAt };
+  });
   const statements: Statement[] = [];
-  for (let index = 0; index < found.length; index += 6) {
-    const chunk = found.slice(index, index + 6);
+  for (let index = 0; index < rows.length; index += 6) {
+    const chunk = rows.slice(index, index + 6);
     statements.push(db.insert(jobs).values(chunk).$dynamic().onConflictDoUpdate({
       target: jobs.canonicalKey,
       set: {
         title: sql`excluded.title`, company: sql`excluded.company`, location: sql`excluded.location`, workplace: sql`excluded.workplace`,
         sourceUrl: sql`excluded.source_url`, applyUrl: sql`excluded.apply_url`, postedAt: sql`excluded.posted_at`, lastSeenAt: sql`excluded.last_seen_at`,
         salary: sql`COALESCE(excluded.salary, ${jobs.salary})`,
+        jdSkills: sql`COALESCE(excluded.jd_skills, ${jobs.jdSkills})`, jdYears: sql`COALESCE(excluded.jd_years, ${jobs.jdYears})`, jdFlags: sql`COALESCE(excluded.jd_flags, ${jobs.jdFlags})`, jdFetchedAt: sql`COALESCE(excluded.jd_fetched_at, ${jobs.jdFetchedAt})`,
         // A job we auto-closed earlier that is back on the board becomes New again; statuses you set stay.
         status: sql`CASE WHEN ${jobs.status} = 'Closed' THEN 'New' ELSE ${jobs.status} END`,
       },

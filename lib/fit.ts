@@ -5,6 +5,8 @@ import { h1bSponsors, jobs } from "../db/schema";
 import { employerKey, matchSponsor, normalizeEmployer, type SponsorRow } from "./h1b";
 import { getState, setState } from "./state";
 import { classifyRole, type RoleFamily } from "./roles";
+import { fetchJobDescription } from "./ats-connectors";
+import { hasHardBlocker, summarizeJd } from "./jd";
 
 /**
  * Fit scoring: how well does a job match the candidate? A small model (Workers AI, Llama 3.1 8B) reads the candidate
@@ -70,7 +72,7 @@ type Parts = { n: number; role: number; seniority: number; skills: number; locat
 type Scored = { n: number; score: number; reason: string };
 const clamp = (value: unknown, max: number) => Math.max(0, Math.min(max, Math.round(Number(value) || 0)));
 
-async function scoreBatch(profile: string, batch: Array<{ n: number; text: string; title: string }>): Promise<Scored[]> {
+async function scoreBatch(profile: string, batch: Array<{ n: number; text: string; title: string; blocked: boolean }>): Promise<Scored[]> {
   const binding = ai(); if (!binding) throw new Error("Workers AI binding \"AI\" is not configured");
   const user = `CANDIDATE PROFILE:\n${profile}\n\nJOBS:\n${batch.map(b => `${b.n}. ${b.text}`).join("\n")}\n\nReturn {"scores":[{"n":<job number>,"role":<0-35>,"seniority":<0-20>,"skills":<0-20>,"location":<0-15>,"sponsorship":<0-10>,"reason":"<one sentence>"}, ...]} covering every job number exactly once.`;
   const part = (max: number) => ({ type: "integer", minimum: 0, maximum: max });
@@ -84,15 +86,15 @@ async function scoreBatch(profile: string, batch: Array<{ n: number; text: strin
   const scores = (parsed as { scores?: Parts[] })?.scores;
   if (!Array.isArray(scores)) throw new Error("model returned no scores array");
   // The total is ours to compute: each component is capped, so "no sponsorship on record" can cost at most 10 points.
-  const titleByN = new Map(batch.map(b => [b.n, b.title]));
+  const byN = new Map(batch.map(b => [b.n, b]));
   return scores.filter(s => Number.isFinite(Number(s.n))).map(s => {
-    const family = classifyRole(titleByN.get(Number(s.n)) ?? "");
+    const item = byN.get(Number(s.n));
+    const family = classifyRole(item?.title ?? "");
     const role = family ? roleTiers[family] : clamp(s.role, UNCLASSIFIED_ROLE_CAP);
-    return {
-      n: Number(s.n),
-      score: role + clamp(s.seniority, 20) + clamp(s.skills, 20) + clamp(s.location, 15) + clamp(s.sponsorship, 10),
-      reason: String(s.reason ?? "").replace(/\s+/g, " ").trim().slice(0, 200),
-    };
+    let score = role + clamp(s.seniority, 20) + clamp(s.skills, 20) + clamp(s.location, 15) + clamp(s.sponsorship, 10);
+    // A description that rules the candidate out (no sponsorship, citizens only, clearance) caps the job regardless.
+    if (item?.blocked) score = Math.min(score - clamp(s.sponsorship, 10), 35);
+    return { n: Number(s.n), score, reason: String(s.reason ?? "").replace(/\s+/g, " ").trim().slice(0, 200) };
   });
 }
 
@@ -112,11 +114,24 @@ export async function scorePendingJobs(limit = 80) {
   const now = new Date().toISOString();
   for (let index = 0; index < pending.length; index += BATCH) {
     const chunk = pending.slice(index, index + BATCH);
+    // Boards that only list titles: read the description once, now, so the score can see skills, years and blockers.
+    await Promise.all(chunk.map(async job => {
+      if (job.jdFetchedAt) return;
+      const text = await fetchJobDescription(job);
+      const jd = text ? summarizeJd(text.slice(0, 8000)) : null;
+      const patch = { jdSkills: jd?.skills.join(", ") || null, jdYears: jd?.years ?? null, jdFlags: jd?.flags.join(",") || null, jdFetchedAt: now };
+      Object.assign(job, patch);
+      await db.update(jobs).set(patch).where(eq(jobs.id, job.id));
+    }));
     const batch = chunk.map((job, i) => {
       const sponsor = matchSponsor(job.company, byKey.get(employerKey(normalizeEmployer(job.company))) ?? []);
+      const flags = (job.jdFlags ?? "").split(",").filter(Boolean);
       const facts = [`"${job.title}" at ${job.company}`, `location: ${job.location || "unknown"} (${job.workplace})`, job.salary ? `salary: ${job.salary}` : "", `source: ${job.source}`,
+        job.jdSkills ? `tools named in the description: ${job.jdSkills}` : "description: not available (judge skills from the title)",
+        job.jdYears ? `asks for ${job.jdYears}+ years of experience` : "",
+        flags.length ? `description states: ${flags.join(", ")}` : "",
         sponsor ? `H-1B on record: yes${sponsor.approvals ? ` (${sponsor.approvals} approvals FY${sponsor.fiscalYear})` : ""}${sponsor.lcaLatestFy ? `, LCAs FY${sponsor.lcaLatestFy}` : ""}` : "H-1B on record: none found"].filter(Boolean).join("; ");
-      return { n: i + 1, text: facts, title: job.title };
+      return { n: i + 1, text: facts, title: job.title, blocked: hasHardBlocker(flags) };
     });
     try {
       const results = await scoreBatch(profile, batch);

@@ -133,3 +133,9 @@ body{margin:0;background:#eef3f6;color:var(--ink);font-family:Inter,ui-sans-seri
 .profile-body textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font:inherit;font-size:13px;line-height:1.45;resize:vertical}
 .profile-actions{display:flex;align-items:center;gap:14px}
 .profile-actions small{color:var(--muted);font-size:12px;line-height:1.4}
+
+.role-cell em.blocker{background:#fde8e8;color:#9b1c1c;border:1px solid #f3b8b8}
+.role-cell em.sponsor-ok{background:#e3f6e8;color:#1b6b34;border:1px solid #b9e3c5}
+.jd-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
+.jd-tags i{font-style:normal;font-size:10px;padding:1px 6px;border-radius:5px;background:#f3f6f9;color:#3d5166;border:1px solid #dfe6ec}
+.jd-tags i.yrs{background:#eef2ff;color:#3b4ea3;border-color:#cfd7f5;font-weight:700}
