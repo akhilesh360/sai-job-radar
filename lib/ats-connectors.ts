@@ -11,7 +11,7 @@ export type CanonicalJob = {
 type Raw = Record<string, unknown>;
 
 // Every connector below is a public JSON endpoint, no credentials and no HTML scraping.
-export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling", "BambooHR", "JobScore"];
+export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling", "BambooHR", "JobScore", "Oracle"];
 
 export function boardKeyPrefix(source: SourceBoard) {
   return `${source.ats}:${source.slug}:`.toLowerCase().replace(/[^a-z0-9:]+/g, "-");
@@ -181,6 +181,26 @@ export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[
       if (!keep(title, location)) return [];
       const id = str(raw.id) || title;
       return [canonical(board, id, title, location, str(raw.detail_url).replace(/\?ref=rss.*$/, "") || `https://careers.jobscore.com/careers/${source.slug}/jobs/${id}`, raw.opened_date ?? raw.last_updated_date)];
+    });
+  }
+
+  if (source.ats === "Oracle") {
+    // Oracle Recruiting Cloud (HCM). Slug is "<host>--<site>", e.g. "jpmc.fa.oraclecloud.com--CX_1001" or a customer
+    // domain such as "careers.honeywell.com--Honeywell". The candidate-experience REST API is public and returns the
+    // newest 100 requisitions; the feed only shows the last 24 hours, so that is plenty.
+    const [host, site = "CX_1"] = source.slug.split("--");
+    if (!host) throw new Error("Oracle slug must be host--site");
+    const data = await json<{ items?: Array<{ requisitionList?: Raw[] }> }>(
+      `https://${host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList.secondaryLocations&finder=findReqs;siteNumber=${encodeURIComponent(site)},limit=100,sortBy=POSTING_DATES_DESC`,
+    );
+    const sitePath = /oraclecloud\.com$/i.test(host) ? `https://${host}/hcmUI/CandidateExperience/en/sites/${site}` : `https://${host}/en/sites/${site}`;
+    return (data.items?.[0]?.requisitionList ?? []).flatMap(raw => {
+      const title = str(raw.Title);
+      const secondary = (raw.secondaryLocations as Raw[] | undefined ?? []).map(item => str(item.Name)).filter(Boolean);
+      const location = [str(raw.PrimaryLocation), ...secondary].filter(Boolean).join("; ") || (raw.PrimaryLocationCountry === "US" ? "United States" : "");
+      if (!keep(title, location)) return [];
+      const id = str(raw.Id) || title;
+      return [canonical(source, id, title, location, `${sitePath}/job/${id}`, raw.PostedDate)];
     });
   }
 

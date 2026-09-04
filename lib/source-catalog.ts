@@ -6,6 +6,7 @@ import seedSources2 from "../data/source-seeds-2.json";
 import seedSources3 from "../data/source-seeds-3.json";
 import seedSources4 from "../data/source-seeds-4.json";
 import seedSources5 from "../data/source-seeds-5.json";
+import seedSources6 from "../data/source-seeds-6.json"; // S&P 500 boards on connectable ATSs (atsresumeai.com study, 2026-06)
 
 const seedSources = [
   ...seedSources1,
@@ -13,6 +14,7 @@ const seedSources = [
   ...seedSources3,
   ...seedSources4,
   ...seedSources5,
+  ...seedSources6,
 ];
 
 const progressKey = "seed_catalog_offset";

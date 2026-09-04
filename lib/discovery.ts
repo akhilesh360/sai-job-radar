@@ -53,7 +53,7 @@ const atsHosts: Array<{ ats: string; hosts: string[]; supported: boolean }> = [
   { ats: "PeopleFluent", hosts: ["peoplefluent.com"], supported: false },
   { ats: "ZohoRecruit", hosts: ["zohorecruit.com"], supported: false },
   // Enterprise / US mid-market HCM career sites (direct employers), search-only.
-  { ats: "Oracle", hosts: ["oraclecloud.com"], supported: false },
+  { ats: "Oracle", hosts: ["oraclecloud.com"], supported: true },
   { ats: "Dayforce", hosts: ["dayforcehcm.com"], supported: false },
   { ats: "ADP", hosts: ["recruiting.adp.com", "workforcenow.adp.com"], supported: false },
   { ats: "Paylocity", hosts: ["recruiting.paylocity.com"], supported: false },
@@ -115,8 +115,10 @@ export function parseSourceUrl(rawUrl: string, origin = "google-discovery"): Par
       "Cornerstone", "ClearCompany", "Homerun", "Trakstar", "ApplicantPro", "Newton", "PeopleFluent", "ZohoRecruit",
       "Dayforce", "HiringThing", "ApplicantStack", "myStaffingPro", "CATS", "Avature"].includes(match.ats)) slug = host.split(".")[0];
     // Shared hosts where neither subdomain nor first path segment names the employer: keep a generic slug (company comes from the title).
-    const sharedHost = ["Oracle", "ADP", "Paylocity", "Paycor", "Gusto", "Wellfound", "Dover", "Y Combinator", "BrassRing"].includes(match.ats);
+    const sharedHost = ["ADP", "Paylocity", "Paycor", "Gusto", "Wellfound", "Dover", "Y Combinator", "BrassRing"].includes(match.ats);
     if (sharedHost) slug = "";
+    // Oracle Recruiting Cloud: the board is host + site (…/hcmUI/CandidateExperience/en/sites/<site>/…).
+    if (match.ats === "Oracle") { const at = parts.indexOf("sites"); slug = at >= 0 && parts[at + 1] ? `${host}--${parts[at + 1]}` : ""; }
     // Hirebridge serves every employer from jobs.hirebridge.com and identifies them by ?cid=.
     if (match.ats === "Hirebridge") slug = url.searchParams.get("cid") ?? "";
     // SuccessFactors career sites share a few hosts (career5.successfactors.com, …) and identify the employer by ?company=.
@@ -132,7 +134,8 @@ export function parseSourceUrl(rawUrl: string, origin = "google-discovery"): Par
       slug = match.ats.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     }
     const id = `${match.ats}:${slug}`.toLowerCase();
-    const boardUrl = match.ats === "JobScore" ? `https://${host}/careers/${encodeURIComponent(slug)}`
+    const boardUrl = match.ats === "Oracle" ? `https://${host}/hcmUI/CandidateExperience/en/sites/${slug.split("--")[1] ?? ""}`
+      : match.ats === "JobScore" ? `https://${host}/careers/${encodeURIComponent(slug)}`
       : parts[0] === slug ? `https://${host}/${encodeURIComponent(slug)}` : `https://${host}`;
     const companyName = slug.replace(/[-_.]+/g, " ").replace(/\b\w/g, char => char.toUpperCase());
     return { id, ats: match.ats, slug, companyName, boardUrl, origin, supported: match.supported };
@@ -209,6 +212,8 @@ export async function discoverNewBoards() {
         const parsed = parseSourceUrl(item.link);
         if (!parsed || isExcludedBoard(parsed)) continue;
         if (parsed.supported && enabledAts.includes(parsed.ats)) {
+          // Oracle tenant hosts (e.g. jpmc.fa.oraclecloud.com) say nothing useful; take the employer from the result title.
+          if (parsed.ats === "Oracle") parsed.companyName = splitTitle(item.title ?? "", parsed.companyName).company || parsed.companyName;
           if (existing.has(parsed.id)) seenBoards.add(parsed.id); else newBoards.set(parsed.id, parsed);
           continue;
         }
