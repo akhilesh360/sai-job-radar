@@ -119,3 +119,17 @@ body{margin:0;background:#eef3f6;color:var(--ink);font-family:Inter,ui-sans-seri
 
 .role-cell .salary{color:var(--green);font-weight:600}
 .role-cell em.h1b{background:#e8f1fb;color:#1f4e8c;border:1px solid #c5d9f1}
+
+/* fit score */
+.role-cell strong .fit{display:inline-block;min-width:26px;margin-right:8px;padding:1px 6px;border-radius:6px;font-size:11px;font-weight:800;text-align:center;vertical-align:1px;font-family:inherit}
+.fit-hi{background:#e3f6e8;color:#1b6b34;border:1px solid #b9e3c5}
+.fit-mid{background:#fff4dd;color:#8a5a00;border:1px solid #f1dca6}
+.fit-lo{background:#f1f3f5;color:#5b6b7a;border:1px solid #d9dfe5}
+.profile-panel{padding:0;overflow:hidden}
+.profile-toggle{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;padding:14px 19px;background:none;border:0;cursor:pointer;font:inherit;color:var(--ink);text-align:left}
+.profile-toggle span{display:flex;align-items:center;gap:8px;font-weight:700}
+.profile-toggle small{color:var(--muted);font-size:12px}
+.profile-body{padding:0 19px 16px;display:grid;gap:10px}
+.profile-body textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font:inherit;font-size:13px;line-height:1.45;resize:vertical}
+.profile-actions{display:flex;align-items:center;gap:14px}
+.profile-actions small{color:var(--muted);font-size:12px;line-height:1.4}

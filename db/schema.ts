@@ -13,6 +13,10 @@ export const jobs = sqliteTable("jobs", {
   sourceUrl: text("source_url").notNull(),
   applyUrl: text("apply_url").notNull(),
   salary: text("salary"),
+  /** 0-100 relevance to the candidate profile (lib/fit.ts); -1 when scoring failed; null when not scored yet. */
+  fitScore: integer("fit_score"),
+  fitReason: text("fit_reason"),
+  fitScoredAt: text("fit_scored_at"),
   postedAt: text("posted_at"),
   discoveredAt: text("discovered_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   lastSeenAt: text("last_seen_at").notNull().default(sql`CURRENT_TIMESTAMP`),

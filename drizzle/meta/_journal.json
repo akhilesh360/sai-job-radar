@@ -50,6 +50,13 @@
       "when": 1788920000000,
       "tag": "0006_h1b_lca_fy",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1788930000000,
+      "tag": "0007_job_fit",
+      "breakpoints": true
     }
   ]
 }

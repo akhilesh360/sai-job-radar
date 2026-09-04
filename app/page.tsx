@@ -8,6 +8,7 @@ type Job = {
   id: string; title: string; company: string; location: string; workplace: "Remote" | "Hybrid" | "Onsite" | "Unknown";
   source: string; salary: string | null; postedAt: string | null; discoveredAt: string; lastSeenAt: string; applyUrl: string; status: Status;
   h1b: { name: string; approvals: number; fiscalYear: number; exact: boolean; lcaLatestFy: number | null } | null;
+  fitScore: number | null; fitReason: string | null;
 };
 type SourceStats = {
   total: number; active: number; pending: number; invalid: number; errored: number; seedCatalogSize: number; catalogOffset: number;
@@ -96,6 +97,9 @@ export default function Home() {
   const [statusFilter, setStatusFilter] = useState("Open");
   const [sort, setSort] = useState("Newest first");
   const [sponsor, setSponsor] = useState("Any sponsorship");
+  const [profile, setProfile] = useState("");
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileBusy, setProfileBusy] = useState(false);
 
   const loadJobs = async () => {
     const response = await fetch("/api/jobs", { cache: "no-store" });
@@ -106,6 +110,31 @@ export default function Home() {
     setNow(at);
     setLastRefresh(new Date(at));
   };
+  const loadProfile = async () => {
+    const response = await fetch("/api/profile", { cache: "no-store" });
+    if (response.ok) setProfile(((await response.json()) as { profile: string }).profile);
+  };
+  const saveProfileAndRescore = async () => {
+    setProfileBusy(true);
+    try {
+      const saved = await fetch("/api/profile", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ profile }) });
+      if (!saved.ok) { setNotice(((await saved.json()) as { error?: string }).error ?? "Could not save the profile."); return; }
+      setNotice("Profile saved. Scoring the newest jobs against it…");
+      let total = 0;
+      for (let pass = 0; pass < 6; pass++) {
+        const result = await post<{ scored: number; failed: number; remaining: number }>("/api/internal/score", { limit: 100 });
+        total += result.scored;
+        setNotice(`Scored ${total} jobs so far… ${result.remaining.toLocaleString()} to go (the rest continue every 5 minutes in the background).`);
+        if (result.remaining === 0) break;
+      }
+      setSort("Best fit first");
+      await loadJobs();
+    } catch (error) {
+      setNotice(`Scoring stopped (${error instanceof Error ? error.message : "unknown error"}). It resumes automatically every 5 minutes.`);
+    } finally {
+      setProfileBusy(false);
+    }
+  };
   const loadSourceStats = async () => {
     const response = await fetch("/api/sources", { cache: "no-store" });
     if (response.ok) setSourceStats(await response.json() as SourceStats);
@@ -114,7 +143,7 @@ export default function Home() {
   // Load on open, then refresh every 5 minutes so jobs found by the background scans appear without a reload.
   useEffect(() => {
     // Kicked off from a callback: the loaders only set state after their fetches resolve, never synchronously.
-    void Promise.resolve().then(() => Promise.all([loadJobs(), loadSourceStats()]));
+    void Promise.resolve().then(() => Promise.all([loadJobs(), loadSourceStats(), loadProfile()]));
     const timer = setInterval(() => { if (!scanningRef.current) void Promise.all([loadJobs(), loadSourceStats()]); }, 5 * 60 * 1000);
     return () => clearInterval(timer);
   }, []);
@@ -226,6 +255,12 @@ export default function Home() {
         && ageHours <= recencyHours[recency];
     }).sort((a, b) => {
       const av = new Date(a.postedAt ?? a.discoveredAt).getTime(), bv = new Date(b.postedAt ?? b.discoveredAt).getTime();
+      if (sort === "Best fit first") {
+        // Unscored and failed (-1) jobs sink to the bottom; ties break by recency.
+        const af = a.fitScore ?? -2, bf = b.fitScore ?? -2;
+        if (af !== bf) return bf - af;
+        return bv - av;
+      }
       return sort === "Newest first" ? bv - av : av - bv;
     });
   }, [jobs, query, role, source, workplace, recency, statusFilter, sort, sponsor, now]);
@@ -280,6 +315,20 @@ export default function Home() {
         <article><span>INTERVIEWS</span><strong>{interviewCount}</strong><small>Keep the pipeline moving</small></article>
       </div>
 
+      <section className="panel profile-panel">
+        <button className="profile-toggle" onClick={() => setProfileOpen(open => !open)} aria-expanded={profileOpen}>
+          <span><Icon name="radar" /> Fit score profile</span>
+          <small>{profileOpen ? "Hide" : profile && !profile.startsWith("Not set yet") ? "Edit — jobs are scored 0–100 against this" : "Set up — describe yourself so every job gets a 0–100 fit score"}</small>
+        </button>
+        {profileOpen && <div className="profile-body">
+          <textarea value={profile} onChange={event => setProfile(event.target.value)} rows={9} spellCheck={false} aria-label="Candidate profile" placeholder="Target roles, seniority, skills, years of experience, locations / remote preference, sponsorship needs, things to avoid…" />
+          <div className="profile-actions">
+            <button className="primary-btn" onClick={() => void saveProfileAndRescore()} disabled={profileBusy || scanning}>{profileBusy ? "Scoring…" : "Save & re-score"}</button>
+            <small>Scores come from a small model reading each job&apos;s title, company, location, salary and sponsorship record against this text. Saving clears existing scores; new jobs are scored every 5 minutes.</small>
+          </div>
+        </div>}
+      </section>
+
       <section className="panel">
         <div className="panel-top">
           <div><h2>Job feed</h2><p>{filtered.length} of {openJobs.length} open jobs match this view</p></div>
@@ -293,7 +342,7 @@ export default function Home() {
           <select value={source} onChange={event => setSource(event.target.value)} aria-label="Filter by source"><option>All sources</option><option>Google finds</option>{sources.map(item => <option key={item}>{item}</option>)}</select>
           <select value={workplace} onChange={event => setWorkplace(event.target.value)} aria-label="Filter by workplace"><option>All locations</option><option>Remote</option><option>Hybrid</option><option>Onsite</option></select>
           <select value={sponsor} onChange={event => setSponsor(event.target.value)} aria-label="Filter by visa sponsorship"><option>Any sponsorship</option><option>H-1B sponsors only</option></select>
-          <select value={sort} onChange={event => setSort(event.target.value)} aria-label="Sort jobs"><option>Newest first</option><option>Oldest first</option></select>
+          <select value={sort} onChange={event => setSort(event.target.value)} aria-label="Sort jobs"><option>Best fit first</option><option>Newest first</option><option>Oldest first</option></select>
         </div>
         <div className="table-wrap">
           <table className="jobs-table">
@@ -302,7 +351,7 @@ export default function Home() {
               {filtered.map(job => {
                 const isNew = now - new Date(job.discoveredAt).getTime() < 86400000;
                 return <tr key={job.id}>
-                  <td><div className="role-cell"><span className="company-avatar">{job.company.slice(0, 2).toUpperCase()}</span><div><strong>{job.title}</strong><span>{job.company} · {classifyRole(job.title) ?? "Engineering"} · {seniority(job.title)}{job.salary && <> · <b className="salary">{job.salary}</b></>}{job.h1b && <em className="h1b" title={`${job.h1b.name}${job.h1b.approvals ? ` — ${job.h1b.approvals.toLocaleString()} H-1B approvals (FY${job.h1b.fiscalYear}, USCIS Employer Data Hub)` : ""}${job.h1b.lcaLatestFy ? ` — certified H-1B LCAs in FY${job.h1b.lcaLatestFy} (DOL disclosure data)` : ""}${job.h1b.exact ? "" : " — matched by name prefix"}`}>H-1B ✓{job.h1b.approvals ? ` ${job.h1b.approvals.toLocaleString()}` : ""}{job.h1b.lcaLatestFy ? ` · FY${job.h1b.lcaLatestFy}` : ""}</em>}{isNew && <em>NEW</em>}{job.source.includes("(Google)") && <em className="unverified">UNVERIFIED</em>}</span></div></div></td>
+                  <td><div className="role-cell"><span className="company-avatar">{job.company.slice(0, 2).toUpperCase()}</span><div><strong>{job.fitScore !== null && job.fitScore >= 0 && <b className={`fit ${job.fitScore >= 75 ? "fit-hi" : job.fitScore >= 50 ? "fit-mid" : "fit-lo"}`} title={job.fitReason ?? ""}>{job.fitScore}</b>}{job.title}</strong><span>{job.company} · {classifyRole(job.title) ?? "Engineering"} · {seniority(job.title)}{job.salary && <> · <b className="salary">{job.salary}</b></>}{job.h1b && <em className="h1b" title={`${job.h1b.name}${job.h1b.approvals ? ` — ${job.h1b.approvals.toLocaleString()} H-1B approvals (FY${job.h1b.fiscalYear}, USCIS Employer Data Hub)` : ""}${job.h1b.lcaLatestFy ? ` — certified H-1B LCAs in FY${job.h1b.lcaLatestFy} (DOL disclosure data)` : ""}${job.h1b.exact ? "" : " — matched by name prefix"}`}>H-1B ✓{job.h1b.approvals ? ` ${job.h1b.approvals.toLocaleString()}` : ""}{job.h1b.lcaLatestFy ? ` · FY${job.h1b.lcaLatestFy}` : ""}</em>}{isNew && <em>NEW</em>}{job.source.includes("(Google)") && <em className="unverified">UNVERIFIED</em>}</span></div></div></td>
                   <td><strong className="plain-strong">{job.location}</strong><span className={`workplace ${job.workplace.toLowerCase()}`}>{job.workplace}</span></td>
                   <td><span className="source-pill">{job.source}</span></td>
                   <td><strong className="time-main">{job.postedAt ? `Posted ${relativeTime(job.postedAt)}` : "Post date unknown"}</strong><span className="time-sub">Found {relativeTime(job.discoveredAt)} · Seen {relativeTime(job.lastSeenAt)}</span></td>
