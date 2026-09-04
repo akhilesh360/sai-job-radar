@@ -40,11 +40,35 @@ function Icon({ name }: { name: "radar" | "search" | "refresh" | "mail" | "exter
   return <svg className="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
 
+/** The host cut a request off for using too much CPU (Cloudflare error 1102); the caller can retry with less work. */
+class ResourceLimitError extends Error {}
+
 async function post<T>(url: string, body?: unknown): Promise<T> {
   const response = await fetch(url, { method: "POST", headers: body ? { "content-type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
-  const result = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(result.error ?? `${url} failed (${response.status})`);
+  // Cloudflare answers a resource-limit kill with an HTML or plain-text error page, not JSON.
+  const text = await response.text();
+  let result: (T & { error?: string }) | undefined;
+  try { result = JSON.parse(text) as T & { error?: string }; } catch { result = undefined; }
+  if (response.status === 503 || text.includes("error code: 1102")) throw new ResourceLimitError(`${url}: the host stopped this request for using too much CPU (Cloudflare 1102)`);
+  if (!response.ok || !result) throw new Error(result?.error ?? `${url} failed (${response.status})`);
   return result;
+}
+
+/**
+ * One slice of a paginated step. Cloudflare's free plan allows about 10 ms of CPU per request, and a slice of
+ * large boards can exceed that; when it does, halve the slice and retry, then grow back towards `max` on success.
+ */
+async function postSlice<T>(url: string, size: { current: number; max: number }, body: Record<string, unknown> = {}): Promise<T> {
+  for (;;) {
+    try {
+      const result = await post<T>(url, { ...body, limit: size.current });
+      if (size.current < size.max) size.current++;
+      return result;
+    } catch (error) {
+      if (!(error instanceof ResourceLimitError) || size.current <= 2) throw error;
+      size.current = Math.max(2, Math.floor(size.current / 2));
+    }
+  }
 }
 
 export default function Home() {
@@ -112,9 +136,10 @@ export default function Home() {
         }
       }
       let remainingPending = Infinity, validated = 0, activeFound = 0;
+      const validateSize = { current: 30, max: 30 };
       while (remainingPending > 0 && !stopRequested.current) {
         setNotice(`Step 2/3 · Checking boards… ${validated.toLocaleString()} checked, ${activeFound.toLocaleString()} live${Number.isFinite(remainingPending) ? `, ${remainingPending.toLocaleString()} left` : ""}`);
-        const result = await post<{ checked: number; active: number; remaining: number }>("/api/internal/validate-sources", { limit: 30 });
+        const result = await postSlice<{ checked: number; active: number; remaining: number }>("/api/internal/validate-sources", validateSize);
         validated += result.checked; activeFound += result.active; remainingPending = result.remaining;
         if (result.checked === 0) break;
       }
@@ -124,9 +149,11 @@ export default function Home() {
       // even when the browser clock and the server clock disagree.
       let since: string | undefined;
       let remaining = Infinity;
+      // Start small: never-scanned boards sort first and can be large. postSlice grows the slice as requests succeed.
+      const scanSize = { current: 12, max: 25 };
       while (remaining > 0 && !stopRequested.current) {
         setNotice(`Step 3/3 · Reading job feeds… ${boardsScanned.toLocaleString()} / ${stats.active.toLocaleString()} boards, ${totalNew} new jobs so far`);
-        const result = await post<{ scanned: number; inserted: number; updated: number; remaining: number; since: string }>("/api/internal/ingest", { limit: 25, since });
+        const result = await postSlice<{ scanned: number; inserted: number; updated: number; remaining: number; since: string }>("/api/internal/ingest", scanSize, since ? { since } : {});
         since = result.since;
         boardsScanned += result.scanned; totalNew += result.inserted; totalRefreshed += result.updated; remaining = result.remaining;
         if (result.scanned === 0) break;
@@ -134,7 +161,10 @@ export default function Home() {
       }
       setNotice(`${stopRequested.current ? "Scan stopped" : "Scan finished"}: ${totalNew} new jobs, ${totalRefreshed} refreshed across ${boardsScanned.toLocaleString()} boards.`);
     } catch (error) {
-      setNotice(`Scan stopped early (${error instanceof Error ? error.message : "unknown error"}). ${totalNew} new jobs were saved; click Scan again to continue where it left off.`);
+      const reason = error instanceof ResourceLimitError
+        ? "the hosting plan's CPU limit was reached (Cloudflare 1102) — the Workers Free plan allows ~10 ms per request; the Paid plan lifts this"
+        : error instanceof Error ? error.message : "unknown error";
+      setNotice(`Scan stopped early (${reason}). ${totalNew} new jobs were saved; click Scan again to continue where it left off.`);
     } finally {
       await Promise.all([loadJobs(), loadSourceStats()]);
       scanningRef.current = false;
