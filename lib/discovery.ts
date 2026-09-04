@@ -83,7 +83,7 @@ export const discoveryPhraseGroups = [
   ["Analytics Engineer", "Business Intelligence Engineer", "BI Engineer", "BI Developer", "Power BI Developer", "Analytics Developer", "Data Visualization Engineer", "Data Scientist", "Decision Scientist", "Data Analyst"],
   ["Machine Learning Engineer", "ML Engineer", "MLOps Engineer", "AI Engineer", "Applied AI Engineer", "Generative AI Engineer", "GenAI Engineer", "LLM Engineer", "RAG Engineer", "AI Platform Engineer", "Agentic AI Engineer", "NLP Engineer"],
   ["GTM Engineer", "Go To Market Engineer", "Growth Engineer", "Revenue Operations Engineer", "Forward Deployed", "Product Engineer", "Cloud Engineer", "AWS Engineer", "GCP Engineer", "Cloud Platform Engineer", "Cloud Infrastructure Engineer"],
-  ["Software Engineer, Data", "Software Engineer, Data Platform", "Backend Engineer, Data", "Software Engineer, AI", "AI Software Engineer", "Software Engineer, Machine Learning", "Solutions Engineer, Data", "Solutions Engineer, AI", "Customer Engineer, Data", "ML Platform Engineer"],
+  ["Software Engineer, Data", "Software Engineer, Data Platform", "Backend Engineer", "Platform Engineer", "Infrastructure Engineer", "Backend Engineer, Data", "Software Engineer, AI", "AI Software Engineer", "Software Engineer, Machine Learning", "Solutions Engineer, Data", "Solutions Engineer, AI", "Customer Engineer, Data", "ML Platform Engineer"],
 ];
 
 // Supported domains get 100 results per query (2 credits); unsupported ones 10 results (1 credit).

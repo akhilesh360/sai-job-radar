@@ -13,6 +13,7 @@ export const roleFamilies = [
   "Forward Deployed / GTM Engineer",
   "Solutions / Customer Engineer",
   "Cloud / DevOps Engineer",
+  "Backend / Platform Engineer",
   "Product Engineer",
 ] as const;
 
@@ -33,6 +34,9 @@ const familyPatterns: Array<{ family: RoleFamily; pattern: RegExp }> = [
   { family: "Data Engineer", pattern: new RegExp(`\\bdata architect\\b|\\b(?:data|etl|elt|etl/elt|dataops|big data|spark|pyspark|kafka|flink|airflow|dbt|snowflake|databricks|nifi|hadoop|dataiku|palantir foundry|foundry|lakehouse|streaming|pipelines?|warehouse)[^\\n]{0,30}\\b${role}\\b|\\b${role},? (?:big )?data\\b|\\bdata engineering\\b`, "i") },
   { family: "Software Engineer, Data/ML", pattern: /\b(?:software|backend|back-end|fullstack|full-stack|full stack|platform|infrastructure|staff|senior|principal|founding) engineer(?:ing)?[^\n]{0,50}\b(?:data|analytics|ml|machine learning|ai|llm|search|ranking|pipelines?|warehouse|lakehouse|streaming|kafka|spark|bi)\b/i },
   { family: "Cloud / DevOps Engineer", pattern: /\b(?:cloud|aws|gcp|google cloud|azure|devops|dev ops|multi-cloud) (?:platform |infrastructure |solutions |systems |software |ops )?engineer(?:ing)?\b/i },
+  // Server-side roles close to data engineering. Plain "Software Engineer", frontend, mobile and generic
+  // "Systems Engineer" (usually IT/hardware) are deliberately not matched.
+  { family: "Backend / Platform Engineer", pattern: /\b(?:backend|back-end|back end|platform|infrastructure|infra|distributed systems|server-side|api) (?:software )?(?:engineer(?:ing)?|developer)\b|\bsoftware (?:engineer(?:ing)?|developer)[^\n]{0,30}\b(?:backend|back-end|back end|platform|infrastructure|infra|distributed systems|server-side)\b/i },
   { family: "Product Engineer", pattern: /\bproduct engineer(?:ing)?\b/i },
 ];
 
