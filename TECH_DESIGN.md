@@ -90,10 +90,11 @@ cron ──► runScheduledMaintenance()
                  for each due board: fetchBoardJobs() → filter → upsert jobs → close vanished jobs
 ```
 
-### 4.2 Manual full scan (dashboard "Scan all boards" — `app/page.tsx`)
+### 4.2 Manual full scan (dashboard "Scan now" — `app/page.tsx`)
 
 ```
-stage catalog (POST /api/sources, 250 seeds per call until complete)
+Google discovery (POST /api/internal/discover)
+  → stage catalog (POST /api/sources, 250 seeds per call until complete)
   → validate pending (POST /api/internal/validate-sources, 30 per call until remaining = 0)
   → scan (POST /api/internal/ingest {limit:25, since}, until remaining = 0)
 ```
@@ -114,8 +115,8 @@ All writes for a board go through `db.batch()` — one round trip, atomic.
 
 ### 4.4 Read path
 
-`GET /api/jobs` → last 2,000 jobs ordered by posted_at desc. The page filters client-side: 7-day window
-(6h / 24h / 3d / 7d), role family (`classifyRole`), status (Open = not Archived/Rejected/Closed),
+`GET /api/jobs` → last 2,000 jobs ordered by posted_at desc. The page filters client-side: strict 24-hour window
+(1h / 6h / 12h / 24h), role family (`classifyRole`), status (Open = not Archived/Rejected/Closed),
 source, workplace type, and free-text search. Reloads every 5 minutes.
 
 ## 5. Data model (D1 / drizzle — `db/schema.ts`)

@@ -15,11 +15,11 @@ tracks your application status per job.
    locations matched by `lib/locations.ts`, upserts them into `jobs`, and marks jobs that have left a
    board as `Closed`.
 4. **Dashboard** — `app/page.tsx` shows the feed with role / recency / status filters. The
-   **Scan all boards** button runs steps 1–3 in a loop until every board is covered.
+   **Scan now** button runs the Google search, then steps 1–3, in a loop until every board is covered.
 5. **Auto-refresh** — `worker/index.ts` exports a `scheduled()` handler (every 15 minutes, see
    `vite.config.ts`) that re-scans boards that are due: boards that have produced matching jobs every
-   ~2 hours, quiet boards once a day. The dashboard itself reloads every 5 minutes and only shows the
-   last 7 days.
+   ~2 hours, quiet boards once a day. The dashboard itself reloads every 5 minutes and only shows roles
+   posted in the last 24 hours.
    If the host does not run cron triggers, point any external scheduler at
    `POST /api/internal/hourly`.
 

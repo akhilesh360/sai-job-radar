@@ -16,7 +16,7 @@ type SourceStats = {
 
 const statuses: Status[] = ["New", "Saved", "Applied", "Interview", "Rejected", "Archived", "Closed"];
 const closedStatuses: Status[] = ["Archived", "Rejected", "Closed"];
-const recencyHours: Record<string, number> = { "6 hours": 6, "24 hours": 24, "3 days": 72, "7 days": 168 };
+const recencyHours: Record<string, number> = { "1 hour": 1, "6 hours": 6, "12 hours": 12, "24 hours": 24 };
 
 function relativeTime(iso: string) {
   const diff = Math.max(0, Date.now() - new Date(iso).getTime());
@@ -57,7 +57,7 @@ export default function Home() {
 
   const [query, setQuery] = useState("");
   const [role, setRole] = useState("All roles");
-  const [recency, setRecency] = useState("7 days");
+  const [recency, setRecency] = useState("24 hours");
   const [source, setSource] = useState("All sources");
   const [workplace, setWorkplace] = useState("All locations");
   const [statusFilter, setStatusFilter] = useState("Open");
@@ -95,6 +95,11 @@ export default function Home() {
     let totalNew = 0, totalRefreshed = 0, boardsScanned = 0;
     try {
       let stats = sourceStats;
+      if (stats?.discoveryConfigured) {
+        setNotice("Step 1/3 · Google search: 96 searches for roles posted in the last 24 hours…");
+        const discovery = await post<{ newSources?: number; bumpedBoards?: number; unverifiedJobs?: number; queries?: number; failed?: number; lastError?: string }>("/api/internal/discover");
+        setNotice(`Google found ${discovery.newSources ?? 0} new companies and fresh postings at ${discovery.bumpedBoards ?? 0} known ones (${discovery.queries ?? 0} searches${discovery.failed ? `, ${discovery.failed} failed` : ""}). Step 2/3 · checking boards…`);
+      }
       if (!stats?.catalogComplete) {
         let offset = stats?.catalogOffset ?? 0, complete = false;
         while (!complete && !stopRequested.current) {
@@ -105,7 +110,7 @@ export default function Home() {
       }
       let remainingPending = Infinity, validated = 0, activeFound = 0;
       while (remainingPending > 0 && !stopRequested.current) {
-        setNotice(`Checking catalog boards… ${validated.toLocaleString()} checked, ${activeFound.toLocaleString()} live${Number.isFinite(remainingPending) ? `, ${remainingPending.toLocaleString()} left` : ""}`);
+        setNotice(`Step 2/3 · Checking boards… ${validated.toLocaleString()} checked, ${activeFound.toLocaleString()} live${Number.isFinite(remainingPending) ? `, ${remainingPending.toLocaleString()} left` : ""}`);
         const result = await post<{ checked: number; active: number; remaining: number }>("/api/internal/validate-sources", { limit: 30 });
         validated += result.checked; activeFound += result.active; remainingPending = result.remaining;
         if (result.checked === 0) break;
@@ -117,7 +122,7 @@ export default function Home() {
       let since: string | undefined;
       let remaining = Infinity;
       while (remaining > 0 && !stopRequested.current) {
-        setNotice(`Scanning boards… ${boardsScanned.toLocaleString()} / ${stats.active.toLocaleString()} scanned, ${totalNew} new jobs so far`);
+        setNotice(`Step 3/3 · Reading job feeds… ${boardsScanned.toLocaleString()} / ${stats.active.toLocaleString()} boards, ${totalNew} new jobs so far`);
         const result = await post<{ scanned: number; inserted: number; updated: number; remaining: number; since: string }>("/api/internal/ingest", { limit: 25, since });
         since = result.since;
         boardsScanned += result.scanned; totalNew += result.inserted; totalRefreshed += result.updated; remaining = result.remaining;
@@ -187,17 +192,17 @@ export default function Home() {
       <div className="brand"><span className="brand-mark"><Icon name="radar" /></span><div><strong>Sai Job Radar</strong><span>US data, AI &amp; engineering jobs, one feed</span></div></div>
       <div className="top-actions">
         <span className="live-pill"><i /> {lastScanLabel}</span>
-        <button className="secondary-btn" onClick={() => void runDiscovery()} disabled={scanning}><Icon name="search" /> Find new companies</button>
+        <button className="secondary-btn" onClick={() => void runDiscovery()} disabled={scanning}><Icon name="search" /> Google search only</button>
         <button className="secondary-btn" onClick={() => void sendDigest()}><Icon name="mail" /> Email digest</button>
         {scanning
           ? <button className="primary-btn" onClick={() => { stopRequested.current = true; setNotice("Stopping after the current batch…"); }}><Icon name="stop" /> Stop</button>
-          : <button className="primary-btn" onClick={() => void runFullScan()}><Icon name="refresh" /> Scan all boards</button>}
+          : <button className="primary-btn" onClick={() => void runFullScan()}><Icon name="refresh" /> Scan now (Google + boards)</button>}
       </div>
     </header>
 
     <section className="workspace">
       <div className="page-heading">
-        <div><p className="eyebrow">30-DAY JOB SEARCH</p><h1>Your job command center</h1><p>Openings from the last 7 days, pulled straight from company ATS boards the moment they are posted.</p></div>
+        <div><p className="eyebrow">30-DAY JOB SEARCH</p><h1>Your job command center</h1><p>Only roles posted in the last 24 hours — found by Google search every 3 hours and direct ATS checks every 15 minutes.</p></div>
         <div className="sync-copy"><span>Last refreshed</span><strong>{lastRefresh ? lastRefresh.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "Loading…"}</strong><small>{sourceStats ? `${sourceStats.active.toLocaleString()} live boards` : ""}</small></div>
       </div>
 
@@ -205,7 +210,7 @@ export default function Home() {
 
       <div className="stats-grid">
         <article><span>NEW JOBS</span><strong>{newCount}</strong><small>Waiting for your review</small></article>
-        <article><span>POSTED TODAY</span><strong>{todayCount}</strong><small>Apply to these first</small></article>
+        <article><span>POSTED LAST 24H</span><strong>{todayCount}</strong><small>Apply to these first</small></article>
         <article><span>APPLICATIONS</span><strong>{appliedCount}</strong><small>Statuses saved automatically</small></article>
         <article><span>INTERVIEWS</span><strong>{interviewCount}</strong><small>Keep the pipeline moving</small></article>
       </div>
@@ -218,7 +223,7 @@ export default function Home() {
         <div className="filters">
           <label className="search-box"><Icon name="search" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search title, company, or location" aria-label="Search jobs" /></label>
           <select value={role} onChange={event => setRole(event.target.value)} aria-label="Filter by role"><option>All roles</option>{roleFamilies.map(item => <option key={item}>{item}</option>)}</select>
-          <select value={recency} onChange={event => setRecency(event.target.value)} aria-label="Filter by age"><option>6 hours</option><option>24 hours</option><option>3 days</option><option>7 days</option></select>
+          <select value={recency} onChange={event => setRecency(event.target.value)} aria-label="Filter by age"><option>1 hour</option><option>6 hours</option><option>12 hours</option><option>24 hours</option></select>
           <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)} aria-label="Filter by status"><option>Open</option><option>All statuses</option>{statuses.map(item => <option key={item}>{item}</option>)}</select>
           <select value={source} onChange={event => setSource(event.target.value)} aria-label="Filter by source"><option>All sources</option>{sources.map(item => <option key={item}>{item}</option>)}</select>
           <select value={workplace} onChange={event => setWorkplace(event.target.value)} aria-label="Filter by workplace"><option>All locations</option><option>Remote</option><option>Hybrid</option><option>Onsite</option></select>
@@ -241,7 +246,7 @@ export default function Home() {
               })}
             </tbody>
           </table>
-          {filtered.length === 0 && <div className="empty-state"><Icon name="search" /><h3>{jobs.length === 0 ? "No jobs yet" : "No jobs match these filters"}</h3><p>{jobs.length === 0 ? "Click “Scan all boards” to pull live openings from every company board." : "Clear a filter or pick a longer time range."}</p></div>}
+          {filtered.length === 0 && <div className="empty-state"><Icon name="search" /><h3>{jobs.length === 0 ? "No jobs yet" : "No jobs match these filters"}</h3><p>{jobs.length === 0 ? "Click “Scan now” to run the Google search and read every company board." : "Clear a filter or pick a longer time range."}</p></div>}
         </div>
       </section>
       <footer className="footer-note"><span><i className="healthy" /> US roles only • Jobs that leave a board are marked Closed automatically</span><span>{sourceStats?.lastScheduledRunAt ? `Auto-scan last ran ${relativeTime(sourceStats.lastScheduledRunAt)}` : "Auto-scan (every 15 min) has not run yet"}{sourceStats && (sourceStats.discoveryConfigured ? ` • Google discovery every ${sourceStats.discoveryIntervalHours}h (${sourceStats.creditsPerDiscoveryRun} credits/run) ${sourceStats.lastDiscoveryAt ? `last ran ${relativeTime(sourceStats.lastDiscoveryAt)}` : "pending"}, ${sourceStats.discoveredBoards} companies found, ${sourceStats.serperCreditsUsed.toLocaleString()} Serper credits used${sourceStats.lastDiscoveryError ? ` • last run: ${sourceStats.lastDiscoveryError}` : ""}` : " • Google discovery off (add SERPER_API_KEY)")}</span></footer>
