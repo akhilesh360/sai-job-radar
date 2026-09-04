@@ -1,9 +1,11 @@
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDb } from "../db";
-import { ingestionRuns, jobs, sourceBoards, systemState } from "../db/schema";
+import { ingestionRuns, jobs, sourceBoards } from "../db/schema";
 import { boardKeyPrefix, enabledAts, fetchBoardJobs, type CanonicalJob } from "./ats-connectors";
 import { defaultSources } from "./default-sources";
+import { discoverNewBoards, discoveryConfigured } from "./discovery";
+import { getState, setState } from "./state";
 
 type Db = ReturnType<typeof getDb>;
 type SourceRow = typeof sourceBoards.$inferSelect;
@@ -36,16 +38,6 @@ export async function ensureDefaultSources(db: Db) {
   for (let index = 0; index < defaultSources.length; index += 7) {
     await db.insert(sourceBoards).values(defaultSources.slice(index, index + 7)).onConflictDoNothing();
   }
-}
-
-export async function setState(db: Db, key: string, value: string) {
-  const at = now();
-  await db.insert(systemState).values({ key, value, updatedAt: at }).onConflictDoUpdate({ target: systemState.key, set: { value, updatedAt: at } });
-}
-
-export async function getState(db: Db, key: string) {
-  const rows = await db.select({ value: systemState.value }).from(systemState).where(eq(systemState.key, key)).limit(1);
-  return rows[0]?.value ?? null;
 }
 
 /** Check pending catalog boards: a board that answers becomes active, one that fails becomes invalid. */
@@ -156,9 +148,13 @@ export async function scanBoards(options: { limit?: number; since?: string; conc
 export async function runScheduledMaintenance() {
   const db = getDb();
   await ensureDefaultSources(db);
-  const validation = await validatePendingSources(15);
+  // Once a day, ask Google (via Serper) for company boards we do not know yet. ~80 credits per day.
+  const lastDiscovery = await getState(db, "last_discovery_at");
+  const discoveryDue = discoveryConfigured() && (!lastDiscovery || Date.now() - new Date(lastDiscovery).getTime() > 23 * 60 * 60 * 1000);
+  const discovery = discoveryDue ? await discoverNewBoards() : null;
+  const validation = await validatePendingSources(discovery?.newSources ? 40 : 15);
   const since = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
   const scan = await scanBoards({ limit: 100, since, mode: "scheduled", concurrency: 8 });
   await setState(db, "last_scheduled_run_at", now());
-  return { validation, scan };
+  return { discovery, validation, scan };
 }

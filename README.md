@@ -23,6 +23,11 @@ tracks your application status per job.
    If the host does not run cron triggers, point any external scheduler at
    `POST /api/internal/hourly`.
 
+6. **Discovery** — once a day (if `SERPER_API_KEY` is set) `lib/discovery.ts` runs 40 Google searches
+   restricted to the ATS domains and the past 24 hours, purely to find company boards that are not in
+   the catalog yet. New boards are staged, validated on the next scheduled run, and scanned. This costs
+   about 80 Serper credits/day (~2,400/month; Serper gives 2,500 free, then $50 per 50,000).
+
 ## Local setup
 
 Requirements: Node.js `>=22.13.0`, npm.
@@ -35,6 +40,7 @@ npm run dev
 The hosted version uses a Cloudflare D1 binding named `DB`. Optional env vars:
 
 ```text
+SERPER_API_KEY     # daily Google discovery of new company boards (optional)
 RESEND_API_KEY     # email digest
 JOB_ALERT_EMAIL    # where the digest goes
 JOB_ALERT_FROM     # optional sender

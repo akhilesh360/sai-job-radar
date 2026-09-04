@@ -11,6 +11,7 @@ type Job = {
 type SourceStats = {
   total: number; active: number; pending: number; invalid: number; errored: number; seedCatalogSize: number; catalogOffset: number;
   catalogComplete: boolean; lastFullScanAt: string | null; lastScheduledRunAt: string | null; oldestScanAt: string | null;
+  discoveryConfigured: boolean; lastDiscoveryAt: string | null; discoveredBoards: number; serperCreditsUsed: number;
 };
 
 const statuses: Status[] = ["New", "Saved", "Applied", "Interview", "Rejected", "Archived", "Closed"];
@@ -133,6 +134,14 @@ export default function Home() {
     }
   };
 
+  const runDiscovery = async () => {
+    setNotice("Asking Google for company boards not in the catalog yet…");
+    const response = await fetch("/api/internal/discover", { method: "POST" });
+    const result = await response.json() as { configured?: boolean; newSources?: number; queries?: number; error?: string };
+    setNotice(!response.ok || !result.configured ? (result.error ?? "Google discovery needs a SERPER_API_KEY setting on the site.") : `Discovery finished: ${result.newSources ?? 0} new company boards found from ${result.queries ?? 0} searches. They will be checked and scanned on the next auto-scan (or click Scan all boards).`);
+    await loadSourceStats();
+  };
+
   const sendDigest = async () => {
     setNotice("Preparing digest…");
     const response = await fetch("/api/internal/digest", { method: "POST" });
@@ -178,6 +187,7 @@ export default function Home() {
       <div className="brand"><span className="brand-mark"><Icon name="radar" /></span><div><strong>Sai Job Radar</strong><span>US data, AI &amp; engineering jobs, one feed</span></div></div>
       <div className="top-actions">
         <span className="live-pill"><i /> {lastScanLabel}</span>
+        <button className="secondary-btn" onClick={() => void runDiscovery()} disabled={scanning}><Icon name="search" /> Find new companies</button>
         <button className="secondary-btn" onClick={() => void sendDigest()}><Icon name="mail" /> Email digest</button>
         {scanning
           ? <button className="primary-btn" onClick={() => { stopRequested.current = true; setNotice("Stopping after the current batch…"); }}><Icon name="stop" /> Stop</button>
@@ -234,7 +244,7 @@ export default function Home() {
           {filtered.length === 0 && <div className="empty-state"><Icon name="search" /><h3>{jobs.length === 0 ? "No jobs yet" : "No jobs match these filters"}</h3><p>{jobs.length === 0 ? "Click “Scan all boards” to pull live openings from every company board." : "Clear a filter or pick a longer time range."}</p></div>}
         </div>
       </section>
-      <footer className="footer-note"><span><i className="healthy" /> US roles only • Jobs that leave a board are marked Closed automatically</span><span>{sourceStats?.lastScheduledRunAt ? `Auto-scan last ran ${relativeTime(sourceStats.lastScheduledRunAt)}` : "Auto-scan (every 15 min) has not run yet"}</span></footer>
+      <footer className="footer-note"><span><i className="healthy" /> US roles only • Jobs that leave a board are marked Closed automatically</span><span>{sourceStats?.lastScheduledRunAt ? `Auto-scan last ran ${relativeTime(sourceStats.lastScheduledRunAt)}` : "Auto-scan (every 15 min) has not run yet"}{sourceStats && (sourceStats.discoveryConfigured ? ` • Google discovery ${sourceStats.lastDiscoveryAt ? `ran ${relativeTime(sourceStats.lastDiscoveryAt)}` : "pending"}, ${sourceStats.discoveredBoards} companies found, ${sourceStats.serperCreditsUsed.toLocaleString()} Serper credits used` : " • Google discovery off (add SERPER_API_KEY)")}</span></footer>
     </section>
   </main>;
 }
