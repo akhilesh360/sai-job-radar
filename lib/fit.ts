@@ -4,6 +4,7 @@ import { getDb } from "../db";
 import { h1bSponsors, jobs } from "../db/schema";
 import { employerKey, matchSponsor, normalizeEmployer, type SponsorRow } from "./h1b";
 import { getState, setState } from "./state";
+import { classifyRole, type RoleFamily } from "./roles";
 
 /**
  * Fit scoring: how well does a job match the candidate? A small model (Workers AI, Llama 3.1 8B) reads the candidate
@@ -43,11 +44,33 @@ Give five sub-scores per job (integers within the stated ranges); the total is c
 
 reason: one sentence, at most 18 words, naming the decisive factor for THIS job.`;
 
+/**
+ * The role component (0-35) is fixed by the owner's priority order rather than left to the model: Data Engineering first,
+ * then Data Science / Analytics, then AI & ML, then GTM / Forward Deployed, then data-flavoured software roles.
+ * Titles the classifier cannot place keep the model's own role judgement, capped low.
+ */
+export const roleTiers: Record<RoleFamily, number> = {
+  "Data Engineer": 35,
+  "Analytics Engineer": 31,
+  "Data Scientist": 30,
+  "Business Intelligence": 27,
+  "Data Analyst": 26,
+  "ML Engineer": 29,
+  "AI Engineer": 29,
+  "Software Engineer, Data/ML": 25,
+  "Forward Deployed / GTM Engineer": 24,
+  "Solutions / Customer Engineer": 21,
+  "Backend / Platform Engineer": 20,
+  "Cloud / DevOps Engineer": 19,
+  "Product Engineer": 14,
+};
+const UNCLASSIFIED_ROLE_CAP = 10;
+
 type Parts = { n: number; role: number; seniority: number; skills: number; location: number; sponsorship: number; reason: string };
 type Scored = { n: number; score: number; reason: string };
 const clamp = (value: unknown, max: number) => Math.max(0, Math.min(max, Math.round(Number(value) || 0)));
 
-async function scoreBatch(profile: string, batch: Array<{ n: number; text: string }>): Promise<Scored[]> {
+async function scoreBatch(profile: string, batch: Array<{ n: number; text: string; title: string }>): Promise<Scored[]> {
   const binding = ai(); if (!binding) throw new Error("Workers AI binding \"AI\" is not configured");
   const user = `CANDIDATE PROFILE:\n${profile}\n\nJOBS:\n${batch.map(b => `${b.n}. ${b.text}`).join("\n")}\n\nReturn {"scores":[{"n":<job number>,"role":<0-35>,"seniority":<0-20>,"skills":<0-20>,"location":<0-15>,"sponsorship":<0-10>,"reason":"<one sentence>"}, ...]} covering every job number exactly once.`;
   const part = (max: number) => ({ type: "integer", minimum: 0, maximum: max });
@@ -61,11 +84,16 @@ async function scoreBatch(profile: string, batch: Array<{ n: number; text: strin
   const scores = (parsed as { scores?: Parts[] })?.scores;
   if (!Array.isArray(scores)) throw new Error("model returned no scores array");
   // The total is ours to compute: each component is capped, so "no sponsorship on record" can cost at most 10 points.
-  return scores.filter(s => Number.isFinite(Number(s.n))).map(s => ({
-    n: Number(s.n),
-    score: clamp(s.role, 35) + clamp(s.seniority, 20) + clamp(s.skills, 20) + clamp(s.location, 15) + clamp(s.sponsorship, 10),
-    reason: String(s.reason ?? "").replace(/\s+/g, " ").trim().slice(0, 200),
-  }));
+  const titleByN = new Map(batch.map(b => [b.n, b.title]));
+  return scores.filter(s => Number.isFinite(Number(s.n))).map(s => {
+    const family = classifyRole(titleByN.get(Number(s.n)) ?? "");
+    const role = family ? roleTiers[family] : clamp(s.role, UNCLASSIFIED_ROLE_CAP);
+    return {
+      n: Number(s.n),
+      score: role + clamp(s.seniority, 20) + clamp(s.skills, 20) + clamp(s.location, 15) + clamp(s.sponsorship, 10),
+      reason: String(s.reason ?? "").replace(/\s+/g, " ").trim().slice(0, 200),
+    };
+  });
 }
 
 /** Score up to `limit` unscored open jobs, newest first. Returns counts; never throws for a single bad batch. */
@@ -88,7 +116,7 @@ export async function scorePendingJobs(limit = 80) {
       const sponsor = matchSponsor(job.company, byKey.get(employerKey(normalizeEmployer(job.company))) ?? []);
       const facts = [`"${job.title}" at ${job.company}`, `location: ${job.location || "unknown"} (${job.workplace})`, job.salary ? `salary: ${job.salary}` : "", `source: ${job.source}`,
         sponsor ? `H-1B on record: yes${sponsor.approvals ? ` (${sponsor.approvals} approvals FY${sponsor.fiscalYear})` : ""}${sponsor.lcaLatestFy ? `, LCAs FY${sponsor.lcaLatestFy}` : ""}` : "H-1B on record: none found"].filter(Boolean).join("; ");
-      return { n: i + 1, text: facts };
+      return { n: i + 1, text: facts, title: job.title };
     });
     try {
       const results = await scoreBatch(profile, batch);
