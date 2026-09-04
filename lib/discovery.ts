@@ -58,6 +58,9 @@ const atsHosts: Array<{ ats: string; hosts: string[]; supported: boolean }> = [
   { ats: "ADP", hosts: ["recruiting.adp.com", "workforcenow.adp.com"], supported: false },
   { ats: "Paylocity", hosts: ["recruiting.paylocity.com"], supported: false },
   { ats: "Paycor", hosts: ["recruitingbypaycor.com"], supported: false },
+  // Enterprise suites common in banking, pharma and hospital systems.
+  { ats: "Avature", hosts: ["avature.net"], supported: false },
+  { ats: "BrassRing", hosts: ["brassring.com"], supported: false },
   // Small-business ATSs, search-only.
   { ats: "HiringThing", hosts: ["hiringthing.com"], supported: false },
   { ats: "ApplicantStack", hosts: ["applicantstack.com"], supported: false },
@@ -110,9 +113,9 @@ export function parseSourceUrl(rawUrl: string, origin = "google-discovery"): Par
     let slug = parts[0] ?? "";
     if (["Recruitee", "Breezy", "Pinpoint", "Teamtailor", "BambooHR", "iCIMS", "Taleo", "Phenom", "Eightfold",
       "Cornerstone", "ClearCompany", "Homerun", "Trakstar", "ApplicantPro", "Newton", "PeopleFluent", "ZohoRecruit",
-      "Dayforce", "HiringThing", "ApplicantStack", "myStaffingPro", "CATS"].includes(match.ats)) slug = host.split(".")[0];
+      "Dayforce", "HiringThing", "ApplicantStack", "myStaffingPro", "CATS", "Avature"].includes(match.ats)) slug = host.split(".")[0];
     // Shared hosts where neither subdomain nor first path segment names the employer: keep a generic slug (company comes from the title).
-    const sharedHost = ["Oracle", "ADP", "Paylocity", "Paycor", "Gusto", "Wellfound", "Dover", "Y Combinator"].includes(match.ats);
+    const sharedHost = ["Oracle", "ADP", "Paylocity", "Paycor", "Gusto", "Wellfound", "Dover", "Y Combinator", "BrassRing"].includes(match.ats);
     if (sharedHost) slug = "";
     // Hirebridge serves every employer from jobs.hirebridge.com and identifies them by ?cid=.
     if (match.ats === "Hirebridge") slug = url.searchParams.get("cid") ?? "";
