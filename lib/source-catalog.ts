@@ -7,6 +7,7 @@ import seedSources3 from "../data/source-seeds-3.json";
 import seedSources4 from "../data/source-seeds-4.json";
 import seedSources5 from "../data/source-seeds-5.json";
 import seedSources6 from "../data/source-seeds-6.json"; // S&P 500 boards on connectable ATSs (atsresumeai.com study, 2026-06)
+import seedSources7 from "../data/source-seeds-7.json"; // boards from the owner's 2025–26 application trackers that the catalog lacked
 
 const seedSources = [
   ...seedSources1,
@@ -15,6 +16,7 @@ const seedSources = [
   ...seedSources4,
   ...seedSources5,
   ...seedSources6,
+  ...seedSources7,
 ];
 
 const progressKey = "seed_catalog_offset";
