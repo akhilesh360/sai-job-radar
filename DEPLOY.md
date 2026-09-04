@@ -84,7 +84,7 @@ Redeploy is not needed after adding variables.
 Open the URL and click **Scan all boards** once. It stages the ~9,200-company catalog, checks which
 boards are alive, and scans every live one (10–15 minutes, progress shown). After that:
 
-- every 5 minutes the cron re-reads 250 due boards, so every productive board is refreshed within 15 minutes (footer shows "Auto-scan last ran …");
+- every 5 minutes the cron re-reads up to 400 due boards (1,200 per 15 minutes), so productive boards are refreshed every 15–30 minutes depending on how many there are (footer shows "Auto-scan last ran …");
 - every 3 hours it runs the Google discovery pass (footer shows credits used);
 - the page reloads itself every 5 minutes.
 

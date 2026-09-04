@@ -11,7 +11,7 @@ import { getState, setState } from "./state";
  *      "Google search" button instead, so Serper credits are spent only when you ask.
  *   2. Validate pending boards (newly discovered ones first).
  *   3. Scan boards that are due: bumped/new boards first, then productive boards not read in the last
- *      14 minutes (250 per run, so all ~730 are refreshed within 15 minutes), then quiet boards older than a day.
+ *      14 minutes (400 per run — 1,200 boards per 15 minutes), then quiet boards older than a day.
  */
 /** Set to true to let the cron run Google discovery every DISCOVERY_INTERVAL_HOURS (default 3) on its own. */
 const AUTO_DISCOVERY = false;
@@ -25,7 +25,8 @@ export async function runScheduledMaintenance() {
   const discovery = discoveryDue ? await discoverNewBoards() : null;
   const validation = await validatePendingSources(60);
   const since = new Date(Date.now() - 14 * 60 * 1000).toISOString();
-  const scan = await scanBoards({ limit: 250, since, mode: "scheduled", concurrency: 8 });
+  // 400 boards ≈ 4 s CPU / 25 s wall on Workers Paid; measured under the 1,000-subrequest ceiling.
+  const scan = await scanBoards({ limit: 400, since, mode: "scheduled", concurrency: 8 });
   // Unverified (Google-only) jobs are never re-checked, so drop the ones older than 48 hours.
   await db.delete(jobs).where(and(like(jobs.source, "%(Google)%"), lt(jobs.discoveredAt, new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()), eq(jobs.status, "New")));
   await setState(db, "last_scheduled_run_at", new Date().toISOString());
