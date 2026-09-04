@@ -52,6 +52,23 @@ const atsHosts: Array<{ ats: string; hosts: string[]; supported: boolean }> = [
   { ats: "Hirebridge", hosts: ["hirebridge.com"], supported: false },
   { ats: "PeopleFluent", hosts: ["peoplefluent.com"], supported: false },
   { ats: "ZohoRecruit", hosts: ["zohorecruit.com"], supported: false },
+  // Enterprise / US mid-market HCM career sites (direct employers), search-only.
+  { ats: "Oracle", hosts: ["oraclecloud.com"], supported: false },
+  { ats: "Dayforce", hosts: ["dayforcehcm.com"], supported: false },
+  { ats: "ADP", hosts: ["recruiting.adp.com", "workforcenow.adp.com"], supported: false },
+  { ats: "Paylocity", hosts: ["recruiting.paylocity.com"], supported: false },
+  { ats: "Paycor", hosts: ["recruitingbypaycor.com"], supported: false },
+  // Small-business ATSs, search-only.
+  { ats: "HiringThing", hosts: ["hiringthing.com"], supported: false },
+  { ats: "ApplicantStack", hosts: ["applicantstack.com"], supported: false },
+  { ats: "myStaffingPro", hosts: ["mystaffingpro.com"], supported: false },
+  { ats: "Gusto", hosts: ["jobs.gusto.com"], supported: false },
+  { ats: "CATS", hosts: ["catsone.com"], supported: false },
+  // Startup job sites (direct employers; no feeds), search-only.
+  { ats: "Wellfound", hosts: ["wellfound.com"], supported: false },
+  { ats: "Gem", hosts: ["jobs.gem.com"], supported: false },
+  { ats: "Dover", hosts: ["app.dover.com"], supported: false },
+  { ats: "Y Combinator", hosts: ["workatastartup.com"], supported: false },
   { ats: "BambooHR", hosts: ["bamboohr.com"], supported: true },
   { ats: "JobScore", hosts: ["careers.jobscore.com"], supported: true },
 ];
@@ -92,7 +109,11 @@ export function parseSourceUrl(rawUrl: string, origin = "google-discovery"): Par
     if (!match) return null;
     let slug = parts[0] ?? "";
     if (["Recruitee", "Breezy", "Pinpoint", "Teamtailor", "BambooHR", "iCIMS", "Taleo", "Phenom", "Eightfold",
-      "Cornerstone", "ClearCompany", "Homerun", "Trakstar", "ApplicantPro", "Newton", "PeopleFluent", "ZohoRecruit"].includes(match.ats)) slug = host.split(".")[0];
+      "Cornerstone", "ClearCompany", "Homerun", "Trakstar", "ApplicantPro", "Newton", "PeopleFluent", "ZohoRecruit",
+      "Dayforce", "HiringThing", "ApplicantStack", "myStaffingPro", "CATS"].includes(match.ats)) slug = host.split(".")[0];
+    // Shared hosts where neither subdomain nor first path segment names the employer: keep a generic slug (company comes from the title).
+    const sharedHost = ["Oracle", "ADP", "Paylocity", "Paycor", "Gusto", "Wellfound", "Dover", "Y Combinator"].includes(match.ats);
+    if (sharedHost) slug = "";
     // Hirebridge serves every employer from jobs.hirebridge.com and identifies them by ?cid=.
     if (match.ats === "Hirebridge") slug = url.searchParams.get("cid") ?? "";
     // SuccessFactors career sites share a few hosts (career5.successfactors.com, …) and identify the employer by ?company=.
@@ -104,8 +125,8 @@ export function parseSourceUrl(rawUrl: string, origin = "google-discovery"): Par
     if (!slug || reserved.includes(slug.toLowerCase()) || !/^[a-z0-9][a-z0-9._ -]{0,80}$/i.test(slug)) {
       // A readable board needs a real slug. A search-only result only needs a company name, which comes from the
       // Google title anyway — so keep it under a generic slug, unless it is the vendor's own www marketing site.
-      if (match.supported || host.startsWith("www.")) return null;
-      slug = match.ats.toLowerCase();
+      if (match.supported || (host.startsWith("www.") && !sharedHost)) return null;
+      slug = match.ats.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     }
     const id = `${match.ats}:${slug}`.toLowerCase();
     const boardUrl = match.ats === "JobScore" ? `https://${host}/careers/${encodeURIComponent(slug)}`
