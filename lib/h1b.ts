@@ -19,6 +19,8 @@ export function employerKey(normalized: string): string {
   return normalized.split(" ")[0] ?? "";
 }
 
+const filler = new Set(["inc", "llc", "corp", "co", "company", "group", "holdings", "holding", "technologies", "technology", "tech", "labs", "lab", "software", "systems", "solutions", "services", "service", "america", "americas", "north", "us", "usa", "u", "s", "international", "global", "opco", "operations", "capital", "management", "business", "com", "io", "health", "healthcare", "financial", "finance", "partners", "ventures", "enterprises", "industries", "digital", "data", "consulting", "networks", "network", "payments", "bank", "national", "association", "n", "a", "trust", "insurance", "media", "labs", "research", "energy", "motor", "motors", "foods", "stores", "worldwide", "platforms", "products", "web", "cloud", "online", "mobile"]);
+
 export type SponsorRow = { nameNorm: string; name: string; approvals: number; fiscalYear: number; state: string | null };
 export type SponsorMatch = { name: string; approvals: number; fiscalYear: number; exact: boolean };
 
@@ -34,13 +36,22 @@ export function matchSponsor(company: string, candidates: SponsorRow[]): Sponsor
   // Every legal entity the name refers to counts: "OpenAI" → OPENAI LP + OPENAI OPCO LLC; "Amazon" → Amazon.com Services,
   // Amazon Web Services, Amazon Data Services… A candidate that is a prefix of the company name also counts when it is
   // specific enough on its own ("meta platforms" for "Meta Platforms Technologies").
-  const hits = candidates.filter(c => c.nameNorm === norm || c.nameNorm.startsWith(`${norm} `) || (c.nameNorm.length >= 5 && norm.startsWith(`${c.nameNorm} `)));
+  // A legal name may extend the company name only with corporate filler ("openai opco", "oracle america",
+  // "voleon capital management"); anything else ("thorn hill", "scribe opco dba koozie group") is a different company.
+  const extendsWithFiller = (legal: string) => legal.startsWith(`${norm} `) && legal.slice(norm.length + 1).split(" ").every(token => filler.has(token));
+  // The reverse — the company name extends the legal name ("Ntt Data Aivista" → "ntt data") — needs a legal name that
+  // is itself specific: at least two words or eight characters, so a surname like "allen" cannot claim it.
+  const isSpecificPrefixOf = (legal: string) => norm.startsWith(`${legal} `) && (legal.includes(" ") || legal.length >= 8);
+  const hits = candidates.filter(c => c.nameNorm === norm || extendsWithFiller(c.nameNorm) || isSpecificPrefixOf(c.nameNorm));
   if (!hits.length) return null;
-  // Without an exact hit, a prefix must be unambiguous: a generic word ("first", "general", "open") fans out to many
-  // unrelated employers, and a very short name ("ramp") is only trusted when it points at one or two of them.
   if (!hits.some(c => c.nameNorm === norm)) {
-    const specific = norm.length >= 5 || norm.includes(" ");
-    if (hits.length > (specific ? 4 : 2)) return null;
+    if (hits.length > 3) return null;
+    // A generic single word ("open", "first") prefixes many employers of which the filler-suffixed ones are a small
+    // share; a real company ("amazon", "meta") dominates the group that shares its first token.
+    if (!norm.includes(" ") && candidates.length >= 3) {
+      const total = candidates.reduce((sum, c) => sum + c.approvals, 0);
+      if (total > 0 && hits.reduce((sum, c) => sum + c.approvals, 0) / total < 0.6) return null;
+    }
   }
   const best = hits.reduce((a, b) => (b.approvals > a.approvals ? b : a));
   return { name: best.name, approvals: hits.reduce((sum, c) => sum + c.approvals, 0), fiscalYear: Math.max(...hits.map(c => c.fiscalYear)), exact: hits.some(c => c.nameNorm === norm) };
