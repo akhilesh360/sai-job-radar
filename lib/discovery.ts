@@ -55,9 +55,21 @@ export const creditsPerDiscoveryRun = plans.reduce((sum, plan) => sum + (plan.nu
 
 export type ParsedSource = { id: string; ats: string; slug: string; companyName: string; boardUrl: string; origin: string; supported: boolean };
 
+// Google occasionally hands back tracking/redirect links (google.com/url?q=…); unwrap them first.
+export function unwrapRedirect(rawUrl: string) {
+  try {
+    const url = new URL(rawUrl);
+    if (/(^|\.)google\.[a-z.]+$/i.test(url.hostname) && url.pathname === "/url") {
+      const target = url.searchParams.get("q") ?? url.searchParams.get("url");
+      if (target) return decodeURIComponent(target);
+    }
+  } catch {}
+  return rawUrl;
+}
+
 export function parseSourceUrl(rawUrl: string, origin = "google-discovery"): ParsedSource | null {
   try {
-    const url = new URL(rawUrl), host = url.hostname.toLowerCase(), parts = url.pathname.split("/").filter(Boolean);
+    const url = new URL(unwrapRedirect(rawUrl)), host = url.hostname.toLowerCase(), parts = url.pathname.split("/").filter(Boolean);
     const match = atsHosts.find(item => item.hosts.some(value => host === value || host.endsWith(`.${value}`)));
     if (!match) return null;
     let slug = parts[0] ?? "";
@@ -138,6 +150,7 @@ export async function discoverNewBoards() {
       for (const item of data.organic ?? []) {
         results++;
         if (!item.link) continue;
+        item.link = unwrapRedirect(item.link);
         const parsed = parseSourceUrl(item.link);
         if (!parsed) continue;
         if (parsed.supported && enabledAts.includes(parsed.ats)) {

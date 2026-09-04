@@ -1,4 +1,6 @@
+import { and, eq, like, lt } from "drizzle-orm";
 import { getDb } from "../db";
+import { jobs } from "../db/schema";
 import { discoverNewBoards, discoveryConfigured, discoveryIntervalHours } from "./discovery";
 import { ensureDefaultSources, scanBoards, validatePendingSources } from "./pipeline";
 import { getState, setState } from "./state";
@@ -21,6 +23,8 @@ export async function runScheduledMaintenance() {
   const validation = await validatePendingSources(discovery?.newSources ? 40 : 15);
   const since = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
   const scan = await scanBoards({ limit: 120, since, mode: "scheduled", concurrency: 8 });
+  // Unverified (Google-only) jobs are never re-checked, so drop the ones older than 48 hours.
+  await db.delete(jobs).where(and(like(jobs.source, "%(Google)%"), lt(jobs.discoveredAt, new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()), eq(jobs.status, "New")));
   await setState(db, "last_scheduled_run_at", new Date().toISOString());
   return { discovery, validation, scan };
 }
