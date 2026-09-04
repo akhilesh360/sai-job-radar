@@ -1,4 +1,4 @@
-import { and, eq, inArray, like, lt } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, like, lt, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { jobs } from "../db/schema";
 import { discoverNewBoards, discoveryConfigured, discoveryIntervalHours } from "./discovery";
@@ -28,7 +28,9 @@ export async function runScheduledMaintenance() {
   const since = new Date(Date.now() - 14 * 60 * 1000).toISOString();
   // 400 boards ≈ 4 s CPU / 25 s wall on Workers Paid; measured under the 1,000-subrequest ceiling.
   const scan = await scanBoards({ limit: 400, since, mode: "scheduled", concurrency: 8 });
-  // Fit-score whatever is new; a scoring problem must never fail the scan.
+  // A job scored before its description was read is re-scored once the description is in (the board-payload backfill
+  // lands a few per scan). Then fit-score whatever is new; a scoring problem must never fail the scan.
+  await db.update(jobs).set({ fitScore: null, fitReason: null, fitScoredAt: null }).where(and(inArray(jobs.status, ["New", "Saved"]), isNotNull(jobs.fitScoredAt), isNotNull(jobs.jdFetchedAt), gt(jobs.jdFetchedAt, sql`${jobs.fitScoredAt}`)));
   const fit = await scorePendingJobs(80).catch(error => ({ configured: true as const, scored: 0, failed: 0, remaining: -1, error: error instanceof Error ? error.message : String(error) }));
   // Unverified (Google-only) jobs are never re-checked, so drop the ones older than 48 hours.
   await db.delete(jobs).where(and(like(jobs.source, "%(Google)%"), lt(jobs.discoveredAt, new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()), eq(jobs.status, "New")));
