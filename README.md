@@ -31,6 +31,10 @@ tracks your application status per job.
    the feed marked *unverified*. Cost: 156 Serper credits per run, ~1,250/day at the default interval
    (a 50,000-credit pack lasts ~40 days; every 2 hours → ~27 days).
 
+## Deploying
+
+See [DEPLOY.md](DEPLOY.md) for deploying to your own Cloudflare account (free tier, ~20 minutes).
+
 ## Local setup
 
 Requirements: Node.js `>=22.13.0`, npm.
