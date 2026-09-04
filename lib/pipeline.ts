@@ -1,9 +1,10 @@
-import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, like, lt, not, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDb } from "../db";
 import { ingestionRuns, jobs, sourceBoards } from "../db/schema";
 import { boardKeyPrefix, enabledAts, fetchBoardJobs, type CanonicalJob } from "./ats-connectors";
 import { defaultSources } from "./default-sources";
+import { excludedBoardLike } from "./exclusions";
 import { setState } from "./state";
 
 type Db = ReturnType<typeof getDb>;
@@ -25,6 +26,9 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, worker: (item
 
 type Statement = BatchItem<"sqlite">;
 
+// Boards matching lib/exclusions.ts are skipped by validation and scanning alike.
+const notExcluded = and(not(like(sourceBoards.slug, excludedBoardLike)), not(like(sourceBoards.companyName, excludedBoardLike)));
+
 // D1 runs a batch as one round trip, which keeps large scans inside the Worker request budget.
 async function runBatch(db: Db, statements: Statement[]) {
   for (let index = 0; index < statements.length; index += BATCH_STATEMENTS) {
@@ -44,7 +48,7 @@ export async function validatePendingSources(limit = 30, concurrency = 6) {
   const db = getDb();
   const originPriority = sql`CASE ${sourceBoards.origin} WHEN 'google-discovery' THEN 0 WHEN 'poc' THEN 1 WHEN 'uploaded-lists' THEN 2 WHEN 'spreadsheet-current' THEN 3 WHEN 'spreadsheet-trial' THEN 4 ELSE 5 END`;
   const pending = await db.select().from(sourceBoards)
-    .where(and(eq(sourceBoards.status, "pending"), inArray(sourceBoards.ats, enabledAts)))
+    .where(and(eq(sourceBoards.status, "pending"), inArray(sourceBoards.ats, enabledAts), notExcluded))
     .orderBy(asc(originPriority), asc(sourceBoards.id)).limit(Math.min(60, Math.max(1, limit)));
   let active = 0, invalid = 0;
   // Statements are collected rather than returned: a drizzle query is a thenable, so returning one from an
@@ -62,7 +66,7 @@ export async function validatePendingSources(limit = 30, concurrency = 6) {
     }
   });
   if (updates.length) await runBatch(db, updates);
-  const remainingRows = await db.select({ count: sql<number>`count(*)` }).from(sourceBoards).where(and(eq(sourceBoards.status, "pending"), inArray(sourceBoards.ats, enabledAts)));
+  const remainingRows = await db.select({ count: sql<number>`count(*)` }).from(sourceBoards).where(and(eq(sourceBoards.status, "pending"), inArray(sourceBoards.ats, enabledAts), notExcluded));
   return { checked: pending.length, active, invalid, remaining: Number(remainingRows[0]?.count ?? 0) };
 }
 
@@ -118,7 +122,7 @@ export async function scanBoards(options: { limit?: number; since?: string; conc
   const due = options.mode === "scheduled"
     ? or(isNull(sourceBoards.lastScannedAt), and(productive, lt(sourceBoards.lastScannedAt, since)), lt(sourceBoards.lastScannedAt, new Date(new Date(since).getTime() - 24 * 60 * 60 * 1000).toISOString()))
     : or(isNull(sourceBoards.lastScannedAt), lt(sourceBoards.lastScannedAt, since));
-  const filter = and(eq(sourceBoards.active, true), inArray(sourceBoards.ats, enabledAts), due);
+  const filter = and(eq(sourceBoards.active, true), inArray(sourceBoards.ats, enabledAts), notExcluded, due);
   const boards = await db.select().from(sourceBoards).where(filter).orderBy(desc(productive), asc(sourceBoards.lastScannedAt), asc(sourceBoards.id)).limit(limit);
   const [run] = await db.insert(ingestionRuns).values({ status: "running" }).returning();
   let fetched = 0, inserted = 0, updated = 0, failed = 0;

@@ -4,6 +4,7 @@ import { getDb } from "../db";
 import { discoveryRuns, jobs, sourceBoards } from "../db/schema";
 import { enabledAts } from "./ats-connectors";
 import { isUsLocation, workplaceType } from "./locations";
+import { isExcludedBoard } from "./exclusions";
 import { classifyRole } from "./roles";
 import { getState, setState } from "./state";
 
@@ -12,7 +13,8 @@ import { getState, setState } from "./state";
  * the past day on every major ATS domain, then:
  *   1. Any company board we have never seen is added to the catalog, validated, and scanned right away.
  *   2. Any known board that Google shows a fresh job for is bumped to the front of the scan queue.
- *   3. Jobs on ATS platforms we cannot read directly (Workday, iCIMS, Jobvite, JazzHR, Teamtailor, ...)
+ *   3. Jobs on ATS platforms we cannot read directly (iCIMS, Jobvite, JazzHR, Teamtailor, ...). Workday results
+ *      are ignored entirely: they arrive without a usable company name and are mostly non-US.
  *      are added straight to the feed from the search result, marked "unverified".
  * So a job shows up whether or not its company was in the database beforehand.
  */
@@ -30,7 +32,6 @@ const atsHosts: Array<{ ats: string; hosts: string[]; supported: boolean }> = [
   { ats: "Recruitee", hosts: ["recruitee.com"], supported: true },
   { ats: "Breezy", hosts: ["breezy.hr"], supported: true },
   { ats: "Pinpoint", hosts: ["pinpointhq.com"], supported: true },
-  { ats: "Workday", hosts: ["myworkdayjobs.com"], supported: false },
   { ats: "iCIMS", hosts: ["icims.com"], supported: false },
   { ats: "Jobvite", hosts: ["jobs.jobvite.com"], supported: false },
   { ats: "JazzHR", hosts: ["applytojob.com"], supported: false },
@@ -73,7 +74,7 @@ export function parseSourceUrl(rawUrl: string, origin = "google-discovery"): Par
     const match = atsHosts.find(item => item.hosts.some(value => host === value || host.endsWith(`.${value}`)));
     if (!match) return null;
     let slug = parts[0] ?? "";
-    if (["Recruitee", "Breezy", "Pinpoint", "Workday", "Teamtailor", "BambooHR", "iCIMS"].includes(match.ats)) slug = host.split(".")[0];
+    if (["Recruitee", "Breezy", "Pinpoint", "Teamtailor", "BambooHR", "iCIMS"].includes(match.ats)) slug = host.split(".")[0];
     if (!slug || ["embed", "jobs", "job", "careers", "apply", "j", "o", "p", "www"].includes(slug.toLowerCase())) return null;
     slug = decodeURIComponent(slug).trim().replace(/[?#].*$/, "");
     if (!/^[a-z0-9][a-z0-9._ -]{0,80}$/i.test(slug)) return null;
@@ -152,7 +153,7 @@ export async function discoverNewBoards() {
         if (!item.link) continue;
         item.link = unwrapRedirect(item.link);
         const parsed = parseSourceUrl(item.link);
-        if (!parsed) continue;
+        if (!parsed || isExcludedBoard(parsed)) continue;
         if (parsed.supported && enabledAts.includes(parsed.ats)) {
           if (existing.has(parsed.id)) seenBoards.add(parsed.id); else newBoards.set(parsed.id, parsed);
           continue;
