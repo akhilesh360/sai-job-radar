@@ -57,7 +57,7 @@ done
 ## 4. Build and deploy
 
 ```bash
-npm run build
+npx vinext build            # (npm run build also works on Linux)
 find dist -name wrangler.json        # note the path it prints, e.g. dist/rsc/wrangler.json
 npx wrangler deploy --config dist/rsc/wrangler.json
 ```

@@ -40,7 +40,7 @@ for f in drizzle/0000_*.sql drizzle/0001_*.sql drizzle/0002_*.sql drizzle/0003_*
 done
 
 say "Building"
-npm run build
+if command -v timeout >/dev/null; then npm run build; else npx vinext build; fi   # macOS has no GNU timeout
 
 say "Deploying"
 CONFIG="$(find dist -name wrangler.json | head -1)"
