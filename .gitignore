@@ -42,3 +42,4 @@ next-env.d.ts
 /work/
 /tsconfig.tsbuildinfo
 /worker-configuration.d.ts
+/data/h1b-lca-stats.sql

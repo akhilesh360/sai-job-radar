@@ -23,7 +23,8 @@ for (const line of lines.slice(1)) {
   m.lcas += lcas; m.positions += Number(f[col("positions")]) || 0; m.data += data;
   for (const [k, c] of [["w25", "data_wage_p25"], ["w50", "data_wage_median"], ["w75", "data_wage_p75"]]) { const v = Number(f[col(c)]); if (v) m[k].push([v, data]); }
   for (const st of (f[col("top_states")] || "").split(",").filter(Boolean)) m.states[st] = (m.states[st] || 0) + lcas;
-  for (const t of (f[col("top_data_titles")] || "").split(" | ").filter(Boolean)) m.titles[t] = (m.titles[t] || 0) + data;
+  // some cells come out of the xlsx wrapped as ="…" (Excel formula-text escape); unwrap them
+  for (const t of (f[col("top_data_titles")] || "").split(" | ").map(t => t.replace(/^="?|"$/g, "").trim()).filter(Boolean)) m.titles[t] = (m.titles[t] || 0) + data;
   merged.set(key, m);
   const e = employers.get(norm) ?? { name: raw, fy: 0, best: 0, states: {} };
   if (lcas > e.best) { e.name = raw; e.best = lcas; } e.fy = Math.max(e.fy, fy); for (const st in m.states) e.states[st] = (e.states[st] || 0) + m.states[st]; employers.set(norm, e);
