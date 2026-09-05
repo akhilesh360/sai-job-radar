@@ -44,13 +44,13 @@ type DeltaRow = { job_id?: string; company_id?: number | bigint; title?: string;
 const dateKey = (date: Date) => date.toISOString().slice(0, 10);
 const toMs = (value: unknown) => (value instanceof Date ? value.getTime() : typeof value === "bigint" ? Number(value) / 1000 : typeof value === "number" ? (value > 1e14 ? value / 1000 : value) : value ? new Date(String(value)).getTime() : NaN);
 
-async function readDelta(day: string, db: ReturnType<typeof getDb>) {
+async function readDelta(day: string, db: ReturnType<typeof getDb>, force: boolean) {
   const response = await fetch(`${BUCKET}/${day}.parquet`, { headers: { "user-agent": "SaiJobRadar/2.0" } });
   if (response.status === 404) return { rows: [] as DeltaRow[], skipped: "missing" as const };
   if (!response.ok) throw new Error(`openjobdata ${day}: HTTP ${response.status}`);
   const etag = response.headers.get("etag") ?? "";
   const stateKey = `ojd_etag_${day}`;
-  if (etag && (await getState(db, stateKey)) === etag) return { rows: [] as DeltaRow[], skipped: "unchanged" as const };
+  if (!force && etag && (await getState(db, stateKey)) === etag) return { rows: [] as DeltaRow[], skipped: "unchanged" as const };
   const buffer = await response.arrayBuffer();
   const file = { byteLength: buffer.byteLength, slice: (start: number, end?: number) => buffer.slice(start, end) };
   const rows = await parquetReadObjects({ file, compressors, columns: ["job_id", "company_id", "title", "country", "is_remote", "workplace_type", "posted_at", "fetched_time", "apply_url", "status"] }) as DeltaRow[];
@@ -66,7 +66,7 @@ export async function syncOpenJobData(force = false) {
   const files: Record<string, string> = {};
   const rows: DeltaRow[] = [];
   for (const day of [dateKey(yesterday), dateKey(today)]) {
-    const result = await readDelta(day, db);
+    const result = await readDelta(day, db, force);
     files[day] = result.skipped ?? `${result.rows.length} rows`;
     rows.push(...result.rows);
   }
@@ -81,9 +81,9 @@ export async function syncOpenJobData(force = false) {
   }
   // Company lookup (their company_id → name/ATS/slug), chunked for D1's parameter limit.
   const ids = [...new Set([...fresh, ...closed].map(row => Number(row.company_id)).filter(Number.isFinite))];
-  const companies = new Map<number, { name: string; ats: string; slug: string }>();
+  const companies = new Map<number, { name: string; ats: string; slug: string; careerUrl: string | null }>();
   for (let index = 0; index < ids.length; index += 90) {
-    for (const row of await db.select().from(ojdCompanies).where(inArray(ojdCompanies.id, ids.slice(index, index + 90)))) companies.set(row.id, { name: row.name, ats: row.ats, slug: row.slug });
+    for (const row of await db.select().from(ojdCompanies).where(inArray(ojdCompanies.id, ids.slice(index, index + 90)))) companies.set(row.id, { name: row.name, ats: row.ats, slug: row.slug, careerUrl: row.careerUrl });
   }
   const catalog = new Set((await db.select({ id: sourceBoards.id }).from(sourceBoards)).map(row => row.id));
   const boards = new Map<string, DiscoveredBoard>();
@@ -92,11 +92,18 @@ export async function syncOpenJobData(force = false) {
   for (const row of fresh) {
     const company = companies.get(Number(row.company_id));
     if (!company) continue;
-    const readable = READABLE[company.ats];
+    let readable = READABLE[company.ats];
+    let slug = company.slug;
+    if (company.ats === "oracle_hcm") {
+      // Oracle boards are read directly too; the board key is host--site, both present in the registry's career_url.
+      const match = /^https?:\/\/([^/]+)\/hcmUI\/CandidateExperience\/[a-z-]+\/sites\/([^/?#]+)/i.exec(company.careerUrl ?? "");
+      if (match) { slug = `${match[1]}--${match[2]}`; readable = { ats: "Oracle", boardUrl: () => `https://${match[1]}/hcmUI/CandidateExperience/en/sites/${match[2]}` }; }
+      else { readableRows++; continue; }
+    }
     if (readable) {
       readableRows++;
-      const id = `${readable.ats}:${company.slug}`.toLowerCase();
-      if (!catalog.has(id) && enabledAts.includes(readable.ats)) boards.set(id, { id, ats: readable.ats, slug: company.slug, companyName: company.name, boardUrl: readable.boardUrl(company.slug), origin: "openjobdata-delta" });
+      const id = `${readable.ats}:${slug}`.toLowerCase();
+      if (!catalog.has(id) && enabledAts.includes(readable.ats)) boards.set(id, { id, ats: readable.ats, slug, companyName: company.name, boardUrl: readable.boardUrl(slug), origin: "openjobdata-delta" });
       continue; // the direct connector carries this company's jobs, with real locations
     }
     if (company.ats === "workday" && !INCLUDE_WORKDAY) { workdayRows++; continue; }
