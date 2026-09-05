@@ -52,7 +52,7 @@ async function resolveWorkableAccount(company: string, website: string, title: s
 }
 
 // Every connector below is a public JSON endpoint, no credentials and no HTML scraping.
-export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling", "BambooHR", "JobScore", "Oracle", "Gem", "AI Jobs", "Workable Search"];
+export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling", "BambooHR", "JobScore", "Oracle", "Gem", "Amazon", "AI Jobs", "Workable Search"];
 
 export function boardKeyPrefix(source: SourceBoard) {
   return `${source.ats}:${source.slug}:`.toLowerCase().replace(/[^a-z0-9:]+/g, "-");
@@ -107,6 +107,7 @@ function atsKeyFromUrl(rawUrl: string): { id: string; ats: string; slug: string;
     else if (host === "jobs.ashbyhq.com" && parts[1]) [ats, slug, jobId] = ["Ashby", parts[0], parts[1]];
     else if (host === "jobs.lever.co" && parts[1]) [ats, slug, jobId] = ["Lever", parts[0], parts[1]];
     else if (host === "jobs.gem.com" && parts[1] && parts[0] !== "source") [ats, slug, jobId] = ["Gem", parts[0], parts[1]];
+    else if (/(^|\.)amazon\.jobs$/.test(host) && parts[1] === "jobs" && parts[2]) [ats, slug, jobId] = ["Amazon", "us", parts[2]];
     else return null;
     if (!/^(?:\d+|[0-9a-f]{8}-[0-9a-f-]{27}|am9icG9zdD[A-Za-z0-9_-]{10,})$/i.test(jobId)) return null;
     return { id: `${ats}:${slug}`.toLowerCase(), ats, slug, jobId };
@@ -376,6 +377,42 @@ export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[
       const id = str(raw.extId) || title;
       return [canonical(board, id, title, location, `https://jobs.gem.com/${source.slug}/${id}`, null)];
     });
+  }
+
+  if (source.ats === "Amazon") {
+    // amazon.jobs exposes the same JSON its search page uses. Newest-first keyword searches over the US, stopped at the
+    // 48-hour mark like the other aggregators; the payload carries the description and qualifications, so no per-job
+    // fetch is needed. Interns and managers are dropped up front. Rows are keyed amazon:us:<icims id>, which is what
+    // atsKeyFromUrl produces for amazon.jobs links from other aggregators, so they merge.
+    const queries = ["data engineer", "business intelligence engineer", "data scientist", "machine learning engineer", "analytics engineer", "applied scientist", "software engineer data"];
+    const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+    const seen = new Set<string>();
+    const out: CanonicalJob[] = [];
+    const strip = (value: unknown) => str(value).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    for (const query of queries) {
+      for (let page = 0; page < 5; page++) {
+        const params = new URLSearchParams({ base_query: query, country: "USA", result_limit: "100", offset: String(page * 100), sort: "recent" });
+        const data = await json<{ jobs?: Raw[] }>(`https://www.amazon.jobs/en/search.json?${params}`);
+        const rows = data.jobs ?? [];
+        if (!rows.length) break;
+        let stale = false;
+        for (const raw of rows) {
+          const postedAt = iso(str(raw.posted_date).replace(/\s+/g, " "));
+          if (postedAt && new Date(postedAt).getTime() < cutoff) { stale = true; continue; }
+          const id = str(raw.id_icims) || str(raw.id);
+          if (!id || seen.has(id) || raw.is_intern === true || raw.is_manager === true) continue;
+          seen.add(id);
+          const title = str(raw.title).replace(/\s+/g, " ").trim();
+          const location = str(raw.normalized_location).replace(/,\s*USA$/i, ", United States") || joinParts(raw.city, raw.state, "United States");
+          if (!keep(title, location)) continue;
+          const board: SourceBoard = { ...source, companyName: str(raw.company_name) || "Amazon" };
+          const jdText = [strip(raw.description), strip(raw.basic_qualifications), strip(raw.preferred_qualifications)].filter(Boolean).join("\n") || undefined;
+          out.push({ ...canonical(board, id, title, location, `https://www.amazon.jobs${str(raw.job_path)}`, postedAt), jdText });
+        }
+        if (stale) break;
+      }
+    }
+    return out;
   }
 
   if (source.ats === "AI Jobs") {
