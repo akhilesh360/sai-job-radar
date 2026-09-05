@@ -345,13 +345,13 @@ export default function Home() {
       <section className="panel profile-panel">
         <button className="profile-toggle" onClick={() => setProfileOpen(open => !open)} aria-expanded={profileOpen}>
           <span><Icon name="radar" /> Fit score profile</span>
-          <small>{profileOpen ? "Hide" : profile && !profile.startsWith("Not set yet") ? "Edit — jobs are scored 0–100 against this" : "Set up — describe yourself so every job gets a 0–100 fit score"}</small>
+          <small>{profileOpen ? "Hide" : profile && !profile.startsWith("Not set yet") ? "Edit — the tools you list here drive the tools-match part of every score" : "Set up — list your tools so every job gets a 0–100 fit score"}</small>
         </button>
         {profileOpen && <div className="profile-body">
           <textarea value={profile} onChange={event => setProfile(event.target.value)} rows={9} spellCheck={false} aria-label="Candidate profile" placeholder="Target roles, seniority, skills, years of experience, locations / remote preference, sponsorship needs, things to avoid…" />
           <div className="profile-actions">
             <button className="primary-btn" onClick={() => void saveProfileAndRescore()} disabled={profileBusy || scanning}>{profileBusy ? "Scoring…" : "Save & re-score"}</button>
-            <small>Scores come from a small model reading each job&apos;s title, company, location, salary and sponsorship record against this text. Saving clears existing scores; new jobs are scored every 5 minutes.</small>
+            <small>Score = role (35) + H-1B on record (10 / 0) + years asked (3–6 → 10, 7+ → 5, 0–2 → 6, unstated → 5) + location (remote 10 · Dallas area 8 · other US 5) + seniority from the title (IC 15 · entry 10 · staff/principal 3 · manager 0) + tools named in the description that appear in this text (up to 20). Hover a score to see the arithmetic. Saving re-scores everything in seconds.</small>
           </div>
         </div>}
       </section>
