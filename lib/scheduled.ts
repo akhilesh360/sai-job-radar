@@ -8,16 +8,17 @@ import { scorePendingJobs } from "./fit";
 
 /**
  * What the Worker cron runs every 5 minutes (Workers Paid plan — a run may use up to 30 s of CPU):
- *   1. Google discovery — only when AUTO_DISCOVERY is on. It is off: Google runs from the dashboard's
- *      "Google search" button instead, so Serper credits are spent only when you ask.
+ *   1. Google discovery — every DISCOVERY_INTERVAL_HOURS (default 12) when AUTO_DISCOVERY is on. Turned on 2026-09-05:
+ *      a run costs ~384 Serper credits and the owner budgets 48k credits per month, so twice a day (~23k/month) leaves
+ *      room for the dashboard's "Google search" button.
  *   2. Validate pending boards (newly discovered ones first).
  *   2b. Re-probe up to 40 dead-letter boards whose weekly retry is due (lib/dead-letter.ts); ones that answer
  *       rejoin the scan rotation, 404s are removed after one failed re-check, other failures after eight weeks.
  *   3. Scan boards that are due: bumped/new boards first, then productive boards not read in the last
  *      14 minutes (400 per run — 1,200 boards per 15 minutes), then quiet boards older than a day.
  */
-/** Set to true to let the cron run Google discovery every DISCOVERY_INTERVAL_HOURS (default 3) on its own. */
-const AUTO_DISCOVERY = false;
+/** Let the cron run Google discovery every DISCOVERY_INTERVAL_HOURS (default 12) on its own. */
+const AUTO_DISCOVERY = true;
 
 export async function runScheduledMaintenance() {
   const db = getDb();

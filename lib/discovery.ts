@@ -189,7 +189,7 @@ function guessLocation(text: string) {
 }
 
 export function discoveryConfigured() { return Boolean(bindings().SERPER_API_KEY); }
-export function discoveryIntervalHours() { return Math.max(1, Number(bindings().DISCOVERY_INTERVAL_HOURS ?? 3) || 3); }
+export function discoveryIntervalHours() { return Math.max(1, Number(bindings().DISCOVERY_INTERVAL_HOURS ?? 12) || 12); }
 
 export async function discoverNewBoards() {
   const key = bindings().SERPER_API_KEY;
