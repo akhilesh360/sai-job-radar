@@ -4,7 +4,7 @@ import { getDb } from "../db";
 import { ingestionRuns, jobs, sourceBoards } from "../db/schema";
 import { boardKeyPrefix, enabledAts, fetchBoardJobs, type CanonicalJob } from "./ats-connectors";
 import { defaultSources } from "./default-sources";
-import { excludedBoardLike } from "./exclusions";
+import { excludedBoardLikes } from "./exclusions";
 import { summarizeJd } from "./jd";
 import { setState } from "./state";
 
@@ -28,7 +28,7 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, worker: (item
 type Statement = BatchItem<"sqlite">;
 
 // Boards matching lib/exclusions.ts are skipped by validation and scanning alike.
-const notExcluded = and(not(like(sourceBoards.slug, excludedBoardLike)), not(like(sourceBoards.companyName, excludedBoardLike)));
+const notExcluded = and(...excludedBoardLikes.flatMap(pattern => [not(like(sourceBoards.slug, pattern)), not(like(sourceBoards.companyName, pattern))]));
 
 // D1 runs a batch as one round trip, which keeps large scans inside the Worker request budget.
 async function runBatch(db: Db, statements: Statement[]) {
@@ -94,8 +94,9 @@ async function upsertBoardJobs(db: Db, source: SourceRow, found: CanonicalJob[],
     return { ...job, jdSkills: jd.skills.join(", ") || null, jdYears: jd.years, jdFlags: jd.flags.join(",") || null, jdFetchedAt: extractedAt };
   });
   const statements: Statement[] = [];
-  for (let index = 0; index < rows.length; index += 6) {
-    const chunk = rows.slice(index, index + 6);
+  // D1 allows 100 bound variables per statement; a job row now carries ~20 columns, so insert 4 rows at a time.
+  for (let index = 0; index < rows.length; index += 4) {
+    const chunk = rows.slice(index, index + 4);
     statements.push(db.insert(jobs).values(chunk).$dynamic().onConflictDoUpdate({
       target: jobs.canonicalKey,
       set: {
