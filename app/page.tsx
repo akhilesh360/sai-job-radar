@@ -113,6 +113,20 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [role, setRole] = useState("All roles");
   const [recency, setRecency] = useState("24 hours");
+  // "Run" = a visit to the dashboard; visits within 30 minutes count as the same run. "New this run" shows what arrived
+  // since the previous run, so a reload a few minutes later does not empty the list.
+  const [run, setRun] = useState("New this run");
+  const [runBounds, setRunBounds] = useState<{ current: number; previous: number; before: number }>({ current: 0, previous: 0, before: 0 });
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("radar_runs");
+      const saved = raw ? JSON.parse(raw) as { current: number; previous: number; before: number } : { current: 0, previous: 0, before: 0 };
+      const at = Date.now();
+      const rolled = !saved.current || at - saved.current > 30 * 60 * 1000 ? { current: at, previous: saved.current || 0, before: saved.previous || 0 } : saved;
+      localStorage.setItem("radar_runs", JSON.stringify(rolled));
+      setRunBounds(rolled);
+    } catch { /* storage unavailable: every job counts as this run */ }
+  }, []);
   const [source, setSource] = useState("All sources");
   const [workplace, setWorkplace] = useState("All locations");
   const [statusFilter, setStatusFilter] = useState("Open");
@@ -276,8 +290,11 @@ export default function Home() {
       const haystack = `${job.title} ${job.company} ${job.location}`.toLowerCase();
       const ageHours = (now - new Date(job.postedAt ?? job.discoveredAt).getTime()) / 3600000;
       const statusOk = statusFilter === "All statuses" || (statusFilter === "Open" ? !closedStatuses.includes(job.status) : job.status === statusFilter);
+      const discovered = new Date(job.discoveredAt).getTime();
+      const runOk = run === "All runs" || (run === "New this run" ? discovered >= runBounds.previous : discovered >= runBounds.before && discovered < runBounds.previous);
       return (!needle || haystack.includes(needle))
         && statusOk
+        && runOk
         && (role === "All roles" || classifyRole(job.title) === role)
         && (source === "All sources" || (source === "Google finds" ? job.source.includes("(Google)") : job.source === source))
         && (workplace === "All locations" || job.workplace === workplace)
@@ -297,7 +314,7 @@ export default function Home() {
       }
       return sort === "Newest first" ? bv - av : av - bv;
     });
-  }, [jobs, query, role, source, workplace, recency, statusFilter, sort, sponsor, minFit, now]);
+  }, [jobs, query, role, source, workplace, recency, statusFilter, sort, sponsor, minFit, now, run, runBounds]);
 
   const openJobs = jobs.filter(job => !closedStatuses.includes(job.status));
   const newCount = openJobs.filter(job => job.status === "New").length;
@@ -377,6 +394,7 @@ export default function Home() {
         <div className="filters">
           <label className="search-box"><Icon name="search" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search title, company, or location" aria-label="Search jobs" /></label>
           <select value={role} onChange={event => setRole(event.target.value)} aria-label="Filter by role"><option>All roles</option>{roleFamilies.map(item => <option key={item}>{item}</option>)}</select>
+          <select value={run} onChange={event => setRun(event.target.value)} aria-label="Filter by run" title="A run is a visit to this page; visits within 30 minutes count as one. New this run = arrived since your previous visit."><option>New this run</option><option>Previous run</option><option>All runs</option></select>
           <select value={recency} onChange={event => setRecency(event.target.value)} aria-label="Filter by age"><option>1 hour</option><option>6 hours</option><option>12 hours</option><option>24 hours</option></select>
           <select value={statusFilter} onChange={event => setStatusFilter(event.target.value)} aria-label="Filter by status"><option>Open</option><option>All statuses</option>{statuses.map(item => <option key={item}>{item}</option>)}</select>
           <select value={source} onChange={event => setSource(event.target.value)} aria-label="Filter by source"><option>All sources</option><option>Google finds</option>{sources.map(item => <option key={item}>{item}</option>)}</select>
@@ -391,9 +409,10 @@ export default function Home() {
             <tbody>
               {filtered.map(job => {
                 const isNew = now - new Date(job.discoveredAt).getTime() < 86400000;
+                const inRun = runBounds.previous > 0 && new Date(job.discoveredAt).getTime() >= runBounds.previous;
                 return <tr key={job.id}>
                   <td><div className="role-cell"><span className="company-avatar">{job.company.slice(0, 2).toUpperCase()}</span><div className="role-body">
-                    <div className="role-title">{job.fitScore !== null && job.fitScore >= 0 && <b className={`fit ${job.fitScore >= 75 ? "fit-hi" : job.fitScore >= 50 ? "fit-mid" : "fit-lo"}`} title={job.fitReason ?? ""}>{job.fitScore}</b>}<strong>{job.title}</strong>{isNew && <em>NEW</em>}{job.source.includes("(Google)") && <em className="unverified">UNVERIFIED</em>}</div>
+                    <div className="role-title">{job.fitScore !== null && job.fitScore >= 0 && <b className={`fit ${job.fitScore >= 75 ? "fit-hi" : job.fitScore >= 50 ? "fit-mid" : "fit-lo"}`} title={job.fitReason ?? ""}>{job.fitScore}</b>}<strong>{job.title}</strong>{inRun && <em className="run-tag" title="Arrived since your previous visit">THIS RUN</em>}{isNew && !inRun && <em>NEW</em>}{job.source.includes("(Google)") && <em className="unverified">UNVERIFIED</em>}</div>
                     <div className="role-meta">{job.company} · {classifyRole(job.title) ?? "Engineering"} · {seniority(job.title)}{job.salary && <> · <b className="salary">{job.salary}</b></>}</div>
                     {(job.h1b || (job.jdFlags && /no-sponsorship|citizens-only|clearance|sponsorship-offered/.test(job.jdFlags))) && <div className="role-badges">{job.h1b && (() => {
                     const latest = job.h1b.lca?.[0], prev = job.h1b.lca?.[1];
