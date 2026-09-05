@@ -32,6 +32,7 @@ flowchart TB
     AGG["Cross-company feeds<br/>Workable Search · Amazon Jobs<br/>Hacker News Who-is-hiring · AI Jobs"]
     OJD["openjobdata.com daily delta<br/>(Hugging Face parquet)"]
     JPX["JobsPipe API<br/>(sponsor-stance query, daily)"]
+    JDL["JobDataLake API<br/>(board finder, daily)"]
     SERP["Serper (Google Search API)"]
     AI["Workers AI · Llama 3.1 8B"]
   end
@@ -56,6 +57,8 @@ flowchart TB
   CRON --> DISC --> SERP
   CRON --> OJDS --> OJD
   CRON --> JPS["lib/jobspipe.ts"] --> JPX
+  CRON --> JDS["lib/jobdatalake.ts"] --> JDL
+  JDS --> D1
   JPS --> D1
   CRON --> FIT --> AI
   CRON --> AL --> SLACK
@@ -77,7 +80,7 @@ flowchart TB
 | Scheduler | Workers Cron Trigger `*/5 * * * *` | 288 maintenance runs a day |
 | Database | Cloudflare D1 (SQLite) via drizzle-orm | Jobs, boards, registries, run logs, key/value state |
 | LLM | Workers AI (`@cf/meta/llama-3.1-8b-instruct`) | Fit score 0–100 per job |
-| Secrets | Workers Secrets | `SERPER_API_KEY`, `SLACK_WEBHOOK_URL`, `JOBSPIPE_API_KEY`, optional `SLACK_MENTION`, `NTFY_TOPIC` |
+| Secrets | Workers Secrets | `SERPER_API_KEY`, `SLACK_WEBHOOK_URL`, `JOBSPIPE_API_KEY`, `JDL_API_KEY`, optional `SLACK_MENTION`, `NTFY_TOPIC` |
 | Search | Serper.dev | Discovery of boards Google indexed in the last 24 h |
 | Company registry | openjobdata.com public dataset (109k companies, detected ATS) | Seeding + mapping delta rows to boards |
 | Build / deploy | `npx vinext build` → `npx wrangler deploy --config dist/server/wrangler.json` | One command from a laptop |
@@ -90,8 +93,9 @@ flowchart TB
 flowchart TD
   A["Cron fires (every 5 min)"] --> B{"Discovery slot?<br/>weekdays 06:30 · 11:30 · 14:30 · 19:30 CT"}
   B -- yes --> C["discoverNewBoards()<br/>46 ATS hosts × 6 phrase groups ≈ 384 Serper credits<br/>new boards → pending · known boards → scan first"]
-  B -- no --> D
-  C --> D["validatePendingSources(60)<br/>one fetch per pending board → active / invalid"]
+  B -- no --> C2
+  C --> C2["syncJobDataLake()<br/>daily: queue readable boards its index knows and we lack"]
+  C2 --> D["validatePendingSources(60)<br/>one fetch per pending board → active / invalid"]
   D --> E["retryDeadLetter()<br/>weekly re-probe · delete after schedule exhausts"]
   E --> F["scanBoards(400, scheduled)<br/>350 productive boards due after 14 min<br/>50 quiet boards due after 24 h"]
   F --> G["per board: fetch feed → title/US filter → upsert → close vanished"]
@@ -197,6 +201,7 @@ company + title + location rows keeping the newest; reloads every 5 minutes.
 | Hacker News | Algolia `search_by_date` for the monthly Who-is-hiring thread | queues boards it links to |
 | AI Jobs | artificialintelligencejobs.co JSON | queues unknown boards |
 | openjobdata | `huggingface.co/buckets/Invicto69/Jobs-Dataset-bucket/resolve/data/minimal/changes/{day}.parquet` | hyparquet in the Worker |
+| JobDataLake (board finder) | `GET api.jobdatalake.com/v1/jobs?q&countries=US&posted_within=24h&per_page=100` (X-API-Key) | 3 calls a day; result URLs are parsed with the Google-discovery parser and unknown Greenhouse/Lever/Ashby/SmartRecruiters/Rippling boards are queued pending (origin `jobdatalake`). Not used as a job source: 400-row test found 109 already held, 212 non-target titles, 7 unknown readable boards |
 | JobsPipe (sponsors) | `POST api.jobspipe.dev/v1/jobs/search` (bearer key) | one query a day: data titles · US · `visa_sponsorship_or: ["offers"]` · last 2 days · 25 rows; ≈50–100 credits/month of the free 1,000. Tested 2026-09-05: its general stream is LinkedIn/Indeed copies, ~30% new vs the radar, too big for the free tier — not used |
 
 Evaluated and rejected (no public JSON or bot walls): Greenhouse candidate search, Remotive, RemoteOK, Himalayas,
@@ -212,7 +217,8 @@ also left out.
 
 1–5 original catalog · 6 S&P 500 · 7 owner's application trackers · 8 SimplifyJobs · 9 Y Combinator · 10 AI Jobs ·
 11 SmartRecruiters lists · 12–13 owner's saved application links (incl. Gem) · 14 openjobdata US companies with
-data-role history · 15 remaining openjobdata US companies on readable ATSs · 16 BCG on Phenom. Staged 8 rows per statement via `POST /api/sources` (never pass `offset` on prod: it rewrites the
+data-role history · 15 remaining openjobdata US companies on readable ATSs · 16 BCG on Phenom · 17 readable boards found
+via JobDataLake's index (Lila Sciences, Syllo, Fantom, RunPod, Ava Labs, Pluralis Research, PartsBase). Staged 8 rows per statement via `POST /api/sources` (never pass `offset` on prod: it rewrites the
 catalog pointer).
 
 ## 8. Scheduling, throughput and cost

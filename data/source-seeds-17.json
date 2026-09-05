@@ -1,0 +1,58 @@
+[
+ {
+  "id": "greenhouse:lilasciences",
+  "ats": "Greenhouse",
+  "slug": "lilasciences",
+  "companyName": "Lila Sciences",
+  "boardUrl": "https://job-boards.greenhouse.io/lilasciences",
+  "origin": "jobdatalake"
+ },
+ {
+  "id": "greenhouse:syllo",
+  "ats": "Greenhouse",
+  "slug": "syllo",
+  "companyName": "Syllo",
+  "boardUrl": "https://job-boards.greenhouse.io/syllo",
+  "origin": "jobdatalake"
+ },
+ {
+  "id": "lever:fantom-corporation",
+  "ats": "Lever",
+  "slug": "fantom-corporation",
+  "companyName": "Fantom",
+  "boardUrl": "https://jobs.lever.co/fantom-corporation",
+  "origin": "jobdatalake"
+ },
+ {
+  "id": "ashby:runpod",
+  "ats": "Ashby",
+  "slug": "runpod",
+  "companyName": "RunPod",
+  "boardUrl": "https://jobs.ashbyhq.com/runpod",
+  "origin": "jobdatalake"
+ },
+ {
+  "id": "ashby:ava-labs",
+  "ats": "Ashby",
+  "slug": "ava-labs",
+  "companyName": "Ava Labs",
+  "boardUrl": "https://jobs.ashbyhq.com/ava-labs",
+  "origin": "jobdatalake"
+ },
+ {
+  "id": "ashby:pluralis-research",
+  "ats": "Ashby",
+  "slug": "pluralis-research",
+  "companyName": "Pluralis Research",
+  "boardUrl": "https://jobs.ashbyhq.com/pluralis-research",
+  "origin": "jobdatalake"
+ },
+ {
+  "id": "ashby:partsbase",
+  "ats": "Ashby",
+  "slug": "partsbase",
+  "companyName": "PartsBase",
+  "boardUrl": "https://jobs.ashbyhq.com/partsbase",
+  "origin": "jobdatalake"
+ }
+]

@@ -5,6 +5,7 @@ import { discoverNewBoards, discoveryConfigured, discoveryDueAt } from "./discov
 import { sendFitAlerts } from "./alerts";
 import { syncOpenJobData } from "./openjobdata";
 import { syncJobsPipe } from "./jobspipe";
+import { syncJobDataLake } from "./jobdatalake";
 import { ensureDefaultSources, retryDeadLetter, scanBoards, validatePendingSources } from "./pipeline";
 import { getState, setState } from "./state";
 import { scorePendingJobs } from "./fit";
@@ -29,6 +30,8 @@ export async function runScheduledMaintenance() {
   const lastDiscovery = await getState(db, "last_discovery_at");
   const discoveryDue = AUTO_DISCOVERY && discoveryConfigured() && discoveryDueAt(new Date(), lastDiscovery);
   const discovery = discoveryDue ? await discoverNewBoards() : null;
+  // JobDataLake as a free board finder: once a day, queue readable boards its index knows and the catalog lacks.
+  const jobdatalake = await syncJobDataLake().catch(error => ({ configured: true as const, skipped: "error" as const, error: error instanceof Error ? error.message : String(error) }));
   const validation = await validatePendingSources(60);
   // A dead-letter problem must never stop the scan.
   const deadLetter = await retryDeadLetter(40).catch(error => ({ probed: 0, recovered: 0, failedAgain: 0, removed: 0, remaining: -1, error: error instanceof Error ? error.message : String(error) }));
@@ -51,5 +54,5 @@ export async function runScheduledMaintenance() {
   // seen for three days is closed (boards are re-read at least daily, so live jobs never get here).
   await db.update(jobs).set({ status: "Closed" }).where(and(inArray(jobs.status, ["New", "Saved"]), lt(jobs.lastSeenAt, new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())));
   await setState(db, "last_scheduled_run_at", new Date().toISOString());
-  return { discovery, validation, deadLetter, scan, fit, alerts, openjobdata, jobspipe };
+  return { discovery, jobdatalake, validation, deadLetter, scan, fit, alerts, openjobdata, jobspipe };
 }
