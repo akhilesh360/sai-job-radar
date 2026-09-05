@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, gte, inArray } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNull, or } from "drizzle-orm";
 import { env } from "cloudflare:workers";
 import { getDb } from "../db";
 import { alertDeliveries, h1bSponsors, jobs } from "../db/schema";
@@ -21,14 +21,28 @@ export async function sendFitAlerts(preview = 0) {
   const db = getDb();
   const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
   const candidates = await db.select().from(jobs)
-    .where(and(eq(jobs.status, "New"), gte(jobs.fitScore, MIN_ALERT_SCORE), gt(jobs.fitScoredAt, since), visibleJobs))
+    // Posted (or, when the ATS gives no date, first seen) within 48 hours: an old posting on a newly added board is not news.
+    .where(and(eq(jobs.status, "New"), gte(jobs.fitScore, MIN_ALERT_SCORE), gt(jobs.fitScoredAt, since), or(gt(jobs.postedAt, since), and(isNull(jobs.postedAt), gt(jobs.discoveredAt, since))), visibleJobs))
     .orderBy(desc(jobs.fitScoredAt), desc(jobs.fitScore)).limit(60); // newest matches first: a fresh 76 must not wait behind old 90s
   if (!candidates.length) return { configured: true as const, sent: 0, failed: 0 };
   // Only successful deliveries block a re-send; a failed attempt is retried on the next pass.
   const already = new Set((await db.select({ jobId: alertDeliveries.jobId }).from(alertDeliveries)
-    .where(and(eq(alertDeliveries.channel, channel), inArray(alertDeliveries.deliveryStatus, ["sent", "backfill"]), inArray(alertDeliveries.jobId, candidates.map(job => job.id))))).map(row => row.jobId));
+    .where(and(eq(alertDeliveries.channel, channel), inArray(alertDeliveries.deliveryStatus, ["sent", "backfill", "duplicate"]), inArray(alertDeliveries.jobId, candidates.map(job => job.id))))).map(row => row.jobId));
   let sent = 0, failed = 0, lastError = "";
-  const batch = preview > 0 ? candidates.slice(0, Math.min(preview, MAX_PER_RUN)) : candidates.filter(job => !already.has(job.id)).slice(0, MAX_PER_RUN);
+  // Same company + same title alerted in the last 30 days = a re-post; do not alert it again.
+  const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+  const recent = await db.select({ company: jobs.company, title: jobs.title }).from(alertDeliveries).innerJoin(jobs, eq(jobs.id, alertDeliveries.jobId))
+    .where(and(eq(alertDeliveries.channel, channel), eq(alertDeliveries.deliveryStatus, "sent"), gt(alertDeliveries.sentAt, monthAgo))).limit(2000);
+  const dupKey = (company: string, title: string) => `${company}|${title}`.toLowerCase().replace(/[^a-z0-9|]+/g, " ").trim();
+  const seenPairs = new Set(recent.map(row => dupKey(row.company, row.title)));
+  const fresh: typeof candidates = [];
+  for (const job of candidates) {
+    if (already.has(job.id)) continue;
+    const key = dupKey(job.company, job.title);
+    if (seenPairs.has(key)) { await db.insert(alertDeliveries).values({ jobId: job.id, channel, deliveryStatus: "duplicate" }).onConflictDoNothing(); continue; }
+    seenPairs.add(key); fresh.push(job);
+  }
+  const batch = preview > 0 ? candidates.slice(0, Math.min(preview, MAX_PER_RUN)) : fresh.slice(0, MAX_PER_RUN);
   if (!batch.length) return { configured: true as const, channel, sent, failed };
   // H-1B sponsor lookup, the same way the fit scorer does it, so sponsors can lead the list.
   const keys = [...new Set(batch.map(job => employerKey(normalizeEmployer(job.company))).filter(Boolean))];
@@ -40,10 +54,14 @@ export async function sendFitAlerts(preview = 0) {
     .sort((a, b) => Number(b.sponsor) - Number(a.sponsor) || (b.job.fitScore ?? 0) - (a.job.fitScore ?? 0));
   const clean = (value: string) => value.replace(/[<>|`]/g, " ").replace(/\s+/g, " ").trim();
   const pad = (value: string, width: number) => (value.length > width ? value.slice(0, width - 1) + "…" : value).padEnd(width);
-  // Slack has no table widget: a fixed-width table for scanning, then a numbered list of clickable links.
-  const table = ["#   Score  H-1B  Title                              Company               Location", ...rows.map(({ job, sponsor }, index) =>
-    `${pad(String(index + 1), 4)}${pad(String(job.fitScore), 7)}${pad(sponsor ? "yes" : "-", 6)}${pad(clean(job.title), 35)}${pad(clean(job.company), 22)}${pad(clean(job.location), 18)}`)].join("\n");
-  const links = rows.map(({ job }, index) => `${index + 1}. <${job.applyUrl}|${clean(job.title).slice(0, 80)}> — ${clean(job.company)}${job.salary ? ` · ${job.salary}` : ""}`);
+  // Slack's table block: one row per match, the title cell is the apply link.
+  const cell = (text: string) => ({ type: "raw_text", text: text || "-" });
+  const tableRows = [
+    ["Score", "Title", "Company", "Location", "H-1B"].map(cell),
+    ...rows.map(({ job, sponsor }) => [cell(String(job.fitScore)),
+      { type: "rich_text", elements: [{ type: "rich_text_section", elements: [{ type: "link", url: job.applyUrl, text: clean(job.title).slice(0, 80) }] }] },
+      cell(clean(job.company).slice(0, 40)), cell(clean(job.location).slice(0, 40)), cell(sponsor ? "yes" : "-")]),
+  ];
   const mention = bindings.SLACK_MENTION ?? "<!channel>";
   let ok = false;
   try {
@@ -55,9 +73,7 @@ export async function sendFitAlerts(preview = 0) {
             text: `${mention} ${rows.length} new match${rows.length === 1 ? "" : "es"} scoring ${MIN_ALERT_SCORE}+`,
             blocks: [
               { type: "section", text: { type: "mrkdwn", text: `${mention} *${rows.length} new match${rows.length === 1 ? "" : "es"} · ${MIN_ALERT_SCORE}+ · sponsors first, then score*` } },
-              { type: "section", text: { type: "mrkdwn", text: "```" + table.slice(0, 2900) + "```" } },
-              ...links.reduce<string[][]>((groups, line) => { const last = groups[groups.length - 1]; if (last && last.join("\n").length + line.length < 2800) last.push(line); else groups.push([line]); return groups; }, [])
-                .map(group => ({ type: "section", text: { type: "mrkdwn", text: group.join("\n") } })),
+              { type: "table", rows: tableRows },
             ],
           }),
         })

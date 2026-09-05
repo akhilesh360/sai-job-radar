@@ -302,6 +302,11 @@ export default function Home() {
         && !/citizens-only|clearance/.test(job.jdFlags ?? "") && !/clearance|citizen|TS\/SCI/i.test(job.title)
         && (minFit === "Any score" || (job.fitScore ?? -1) >= Number.parseInt(minFit, 10))
         && ageHours <= recencyHours[recency];
+    }).filter((job, _index, list) => {
+      // Same company + title + location posted twice (per-state re-posts, board + aggregator): keep only the newest.
+      const key = `${job.company}|${job.title}|${job.location}`.toLowerCase().replace(/[^a-z0-9|]+/g, " ");
+      const when = (item: Job) => new Date(item.postedAt ?? item.discoveredAt).getTime();
+      return !list.some(other => other !== job && `${other.company}|${other.title}|${other.location}`.toLowerCase().replace(/[^a-z0-9|]+/g, " ") === key && (when(other) > when(job) || (when(other) === when(job) && other.id < job.id)));
     }).sort((a, b) => {
       const av = new Date(a.postedAt ?? a.discoveredAt).getTime(), bv = new Date(b.postedAt ?? b.discoveredAt).getTime();
       if (sort.startsWith("Fit:")) {
