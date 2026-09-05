@@ -15,6 +15,7 @@ type SourceStats = {
   total: number; active: number; pending: number; invalid: number; errored: number; seedCatalogSize: number; catalogOffset: number;
   catalogComplete: boolean; lastFullScanAt: string | null; lastScheduledRunAt: string | null; oldestScanAt: string | null;
   discoveryConfigured: boolean; discoveryIntervalHours: number; creditsPerDiscoveryRun: number; lastDiscoveryAt: string | null; lastDiscoveryError: string | null; discoveredBoards: number; serperCreditsUsed: number;
+  deadLetter?: { waiting: number; dead: number; dueNow: number; nextRetryAt: string | null; byKind: Record<string, { waiting: number; dead: number }>; lastRetryAt: string | null; recoveredTotal: number };
 };
 type DiscoveryResult = {
   configured: boolean; queries: number; results: number; newSources: number; bumpedBoards: number; unverifiedJobs: number;
@@ -23,6 +24,14 @@ type DiscoveryResult = {
 
 // Credits in your Serper account when this dashboard started counting; used for the low-credit warning.
 const SERPER_CREDITS_BOUGHT = 48000;
+/** Tooltip for the dead-letter chip: boards parked per failure reason, and when the cron next re-probes one. */
+function deadLetterTitle(dlq: NonNullable<SourceStats["deadLetter"]>) {
+  const labels: Record<string, string> = { gone: "board removed (404)", blocked: "blocked (401/403/429)", transient: "network / server error", parse: "returned HTML, not JSON", excluded: "excluded by policy", unsupported: "no connector" };
+  const lines = Object.entries(dlq.byKind).filter(([, v]) => v.waiting || v.dead).map(([k, v]) => `${labels[k] ?? k}: ${v.waiting} waiting, ${v.dead} dead`);
+  lines.push(dlq.dueNow ? `${dlq.dueNow} due for retry now` : dlq.nextRetryAt ? `next retry ${new Date(dlq.nextRetryAt).toLocaleString()}` : "nothing scheduled");
+  if (dlq.lastRetryAt) lines.push(`last retry ${new Date(dlq.lastRetryAt).toLocaleString()}`);
+  return lines.join("\n");
+}
 const statuses: Status[] = ["New", "Saved", "Applied", "Interview", "Rejected", "Archived", "Closed"];
 const closedStatuses: Status[] = ["Archived", "Rejected", "Closed"];
 const recencyHours: Record<string, number> = { "1 hour": 1, "6 hours": 6, "12 hours": 12, "24 hours": 24 };
@@ -359,7 +368,10 @@ export default function Home() {
       <section className="panel">
         <div className="panel-top">
           <div><h2>Job feed</h2><p>{filtered.length} of {openJobs.length} open jobs match this view</p></div>
-          <div className="source-health"><span><i className="healthy" /> {sourceStats ? `${sourceStats.active.toLocaleString()} live boards • ${sourceStats.pending.toLocaleString()} unchecked • ${sourceStats.invalid.toLocaleString()} dead • ${sourceStats.catalogOffset.toLocaleString()}/${sourceStats.seedCatalogSize.toLocaleString()} catalog loaded` : "Loading sources…"}</span></div>
+          <div className="source-health">
+            <span><i className="healthy" /> {sourceStats ? `${sourceStats.active.toLocaleString()} live boards • ${sourceStats.pending.toLocaleString()} unchecked • ${sourceStats.catalogOffset.toLocaleString()}/${sourceStats.seedCatalogSize.toLocaleString()} catalog loaded` : "Loading sources…"}</span>
+            {sourceStats?.deadLetter && <span title={deadLetterTitle(sourceStats.deadLetter)}><i className="healthy parked" /> {`${sourceStats.deadLetter.waiting.toLocaleString()} in retry queue • ${sourceStats.deadLetter.dead.toLocaleString()} dead • ${sourceStats.deadLetter.recoveredTotal.toLocaleString()} recovered`}</span>}
+          </div>
         </div>
         <div className="filters">
           <label className="search-box"><Icon name="search" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Search title, company, or location" aria-label="Search jobs" /></label>

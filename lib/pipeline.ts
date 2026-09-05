@@ -6,7 +6,8 @@ import { boardKeyPrefix, enabledAts, fetchBoardJobs, type CanonicalJob } from ".
 import { defaultSources } from "./default-sources";
 import { excludedBoardLikes } from "./exclusions";
 import { summarizeJd } from "./jd";
-import { setState } from "./state";
+import { deadLetterFields, failureKinds, recoveredFields, type FailureKind } from "./dead-letter";
+import { getState, setState } from "./state";
 
 type Db = ReturnType<typeof getDb>;
 type SourceRow = typeof sourceBoards.$inferSelect;
@@ -60,10 +61,11 @@ export async function validatePendingSources(limit = 30, concurrency = 6) {
     try {
       const found = await fetchBoardJobs(source);
       active++;
-      updates.push(db.update(sourceBoards).set({ status: "active", active: true, lastValidatedAt: at, lastError: null, consecutiveFailures: 0, lastJobCount: found.length, updatedAt: at }).where(eq(sourceBoards.id, source.id)));
+      updates.push(db.update(sourceBoards).set({ status: "active", active: true, lastValidatedAt: at, lastError: null, consecutiveFailures: 0, lastJobCount: found.length, ...recoveredFields, updatedAt: at }).where(eq(sourceBoards.id, source.id)));
     } catch (error) {
       invalid++;
-      updates.push(db.update(sourceBoards).set({ status: "invalid", active: false, lastValidatedAt: at, lastError: error instanceof Error ? error.message : "Validation failed", consecutiveFailures: 1, updatedAt: at }).where(eq(sourceBoards.id, source.id)));
+      const message = error instanceof Error ? error.message : "Validation failed";
+      updates.push(db.update(sourceBoards).set({ status: "invalid", active: false, lastValidatedAt: at, lastError: message, consecutiveFailures: 1, ...deadLetterFields(message, 1), updatedAt: at }).where(eq(sourceBoards.id, source.id)));
     }
   });
   if (updates.length) await runBatch(db, updates);
@@ -115,7 +117,7 @@ async function upsertBoardJobs(db: Db, source: SourceRow, found: CanonicalJob[],
     lt(jobs.lastSeenAt, scanStartedAt),
     inArray(jobs.status, ["New", "Saved"]),
   )));
-  statements.push(db.update(sourceBoards).set({ lastScannedAt: at, lastJobCount: found.length, lastError: null, consecutiveFailures: 0, status: "active", active: true, updatedAt: at }).where(eq(sourceBoards.id, source.id)));
+  statements.push(db.update(sourceBoards).set({ lastScannedAt: at, lastJobCount: found.length, lastError: null, consecutiveFailures: 0, status: "active", active: true, ...recoveredFields, updatedAt: at }).where(eq(sourceBoards.id, source.id)));
   await runBatch(db, statements);
   const inserted = found.filter(job => !existingKeys.has(job.canonicalKey)).length;
   return { inserted, updated: found.length - inserted };
@@ -152,7 +154,9 @@ export async function scanBoards(options: { limit?: number; since?: string; conc
     } catch (error) {
       failed++;
       const at = now(), count = source.consecutiveFailures + 1, disable = count >= MAX_FAILURES_BEFORE_DISABLE;
-      failures.push(db.update(sourceBoards).set({ lastScannedAt: at, lastError: error instanceof Error ? error.message : "Scan failed", consecutiveFailures: count, status: disable ? "error" : "active", active: !disable, updatedAt: at }).where(eq(sourceBoards.id, source.id)));
+      const message = error instanceof Error ? error.message : "Scan failed";
+      // After MAX_FAILURES_BEFORE_DISABLE the board leaves the scan rotation and enters the dead-letter queue.
+      failures.push(db.update(sourceBoards).set({ lastScannedAt: at, lastError: message, consecutiveFailures: count, status: disable ? "error" : "active", active: !disable, ...(disable ? deadLetterFields(message, 1) : {}), updatedAt: at }).where(eq(sourceBoards.id, source.id)));
     }
   });
   if (failures.length) await runBatch(db, failures);
@@ -162,4 +166,65 @@ export async function scanBoards(options: { limit?: number; since?: string; conc
   await db.update(ingestionRuns).set({ finishedAt: now(), status, fetched, inserted, updated, failed }).where(eq(ingestionRuns.id, run.id));
   if (remaining === 0) await setState(db, "last_full_scan_at", now());
   return { runId: run.id, status, scanned: boards.length, fetched, inserted, updated, failed, remaining, since };
+}
+
+/**
+ * Re-probe dead-letter boards that are due (`next_retry_at` in the past). A board that answers is reactivated; one
+ * that fails again is pushed further out on its backoff schedule or marked dead once the schedule is exhausted.
+ * `force` ignores `next_retry_at` (used for a full manual re-check) but never touches boards already marked dead.
+ */
+export async function retryDeadLetter(limit = 40, concurrency = 8, force = false) {
+  const db = getDb();
+  const at = now();
+  const parked = and(inArray(sourceBoards.status, ["invalid", "error"]), isNull(sourceBoards.deadAt), inArray(sourceBoards.ats, enabledAts), notExcluded);
+  const due = force ? parked : and(parked, or(isNull(sourceBoards.nextRetryAt), lt(sourceBoards.nextRetryAt, at)));
+  const boards = await db.select().from(sourceBoards).where(due).orderBy(asc(sourceBoards.nextRetryAt), asc(sourceBoards.id)).limit(Math.min(120, Math.max(1, limit)));
+  let recovered = 0, failedAgain = 0, dead = 0;
+  const updates: Statement[] = [];
+  await mapWithConcurrency(boards, concurrency, async source => {
+    const probedAt = now();
+    try {
+      const found = await fetchBoardJobs(source);
+      recovered++;
+      updates.push(db.update(sourceBoards).set({ status: "active", active: true, lastValidatedAt: probedAt, lastError: null, consecutiveFailures: 0, lastJobCount: found.length, lastScannedAt: null, ...recoveredFields, updatedAt: probedAt }).where(eq(sourceBoards.id, source.id)));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Retry failed";
+      const fields = deadLetterFields(message, source.retryCount + 1);
+      if (fields.deadAt) dead++; else failedAgain++;
+      updates.push(db.update(sourceBoards).set({ lastValidatedAt: probedAt, lastError: message, ...fields, updatedAt: probedAt }).where(eq(sourceBoards.id, source.id)));
+    }
+  });
+  if (updates.length) await runBatch(db, updates);
+  if (recovered) {
+    const previous = Number(await getState(db, "dlq_recovered_total")) || 0;
+    await setState(db, "dlq_recovered_total", String(previous + recovered));
+  }
+  if (boards.length) await setState(db, "dlq_last_retry_at", at);
+  const remainingRows = await db.select({ count: sql<number>`count(*)` }).from(sourceBoards).where(due);
+  return { probed: boards.length, recovered, failedAgain, dead, remaining: Number(remainingRows[0]?.count ?? 0) };
+}
+
+
+/** What sits in the dead-letter queue, by reason, plus what is due and what has been given up on. */
+export async function deadLetterSummary() {
+  const db = getDb();
+  const at = now();
+  const rows = await db.select({ kind: sourceBoards.failureKind, dead: sql<number>`CASE WHEN ${sourceBoards.deadAt} IS NULL THEN 0 ELSE 1 END`, count: sql<number>`count(*)` })
+    .from(sourceBoards).where(inArray(sourceBoards.status, ["invalid", "error"])).groupBy(sourceBoards.failureKind, sql`CASE WHEN ${sourceBoards.deadAt} IS NULL THEN 0 ELSE 1 END`);
+  const byKind: Record<string, { waiting: number; dead: number }> = {};
+  for (const kind of failureKinds) byKind[kind] = { waiting: 0, dead: 0 };
+  let waiting = 0, dead = 0;
+  for (const row of rows) {
+    const kind = (row.kind ?? "transient") as FailureKind;
+    byKind[kind] ??= { waiting: 0, dead: 0 };
+    if (Number(row.dead)) { byKind[kind].dead += Number(row.count); dead += Number(row.count); }
+    else { byKind[kind].waiting += Number(row.count); waiting += Number(row.count); }
+  }
+  const dueRows = await db.select({ count: sql<number>`count(*)` }).from(sourceBoards)
+    .where(and(inArray(sourceBoards.status, ["invalid", "error"]), isNull(sourceBoards.deadAt), or(isNull(sourceBoards.nextRetryAt), lt(sourceBoards.nextRetryAt, at))));
+  const nextRows = await db.select({ next: sql<string | null>`min(${sourceBoards.nextRetryAt})` }).from(sourceBoards)
+    .where(and(inArray(sourceBoards.status, ["invalid", "error"]), isNull(sourceBoards.deadAt), gt(sourceBoards.nextRetryAt, at)));
+  const sample = await db.select({ id: sourceBoards.id, companyName: sourceBoards.companyName, ats: sourceBoards.ats, failureKind: sourceBoards.failureKind, lastError: sourceBoards.lastError, retryCount: sourceBoards.retryCount, nextRetryAt: sourceBoards.nextRetryAt, deadAt: sourceBoards.deadAt })
+    .from(sourceBoards).where(and(inArray(sourceBoards.status, ["invalid", "error"]), isNull(sourceBoards.deadAt), not(eq(sourceBoards.failureKind, "gone")))).orderBy(desc(sourceBoards.updatedAt)).limit(25);
+  return { waiting, dead, dueNow: Number(dueRows[0]?.count ?? 0), nextRetryAt: nextRows[0]?.next ?? null, byKind, lastRetryAt: await getState(db, "dlq_last_retry_at"), recoveredTotal: Number(await getState(db, "dlq_recovered_total")) || 0, sample };
 }

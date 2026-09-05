@@ -40,6 +40,7 @@ body{margin:0;background:#eef3f6;color:var(--ink);font-family:Inter,ui-sans-seri
 .panel-top h2{font-family:Georgia,serif;font-size:20px;margin:0 0 3px}
 .panel-top p{margin:0;font-size:11px;color:var(--muted)}
 .source-health{display:flex;align-items:center;gap:13px;font-size:11px;color:#4a6074}
+.source-health i.parked{background:#c98a1a;box-shadow:0 0 0 3px #f7ead3}
 .source-health button{border:0;background:transparent;color:var(--blue);font-weight:700;font-size:11px;cursor:pointer}
 .filters{border-top:1px solid #e7edf2;border-bottom:1px solid #e7edf2;background:#f8fafb;padding:11px 14px;display:grid;grid-template-columns:minmax(240px,1.5fr) repeat(6,minmax(115px,.55fr));gap:8px}
 .search-box{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #ced9e2;border-radius:7px;padding:0 11px;color:#7c8c9c}

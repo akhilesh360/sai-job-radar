@@ -62,6 +62,11 @@ export const sourceBoards = sqliteTable("source_boards", {
   lastError: text("last_error"),
   consecutiveFailures: integer("consecutive_failures").notNull().default(0),
   lastJobCount: integer("last_job_count").notNull().default(0),
+  // Dead-letter fields: why the board last failed, how many attempts so far, when to try again, or when we gave up.
+  failureKind: text("failure_kind"),
+  retryCount: integer("retry_count").notNull().default(0),
+  nextRetryAt: text("next_retry_at"),
+  deadAt: text("dead_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [uniqueIndex("source_boards_ats_slug_unique").on(table.ats, table.slug)]);
