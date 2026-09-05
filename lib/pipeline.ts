@@ -2,7 +2,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, like, lt, not, or, sql } from 
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDb } from "../db";
 import { ingestionRuns, jobs, sourceBoards } from "../db/schema";
-import { boardKeyPrefix, enabledAts, fetchBoardJobs, type CanonicalJob } from "./ats-connectors";
+import { boardKeyPrefix, drainDiscoveredBoards, enabledAts, fetchBoardJobs, type CanonicalJob, type DiscoveredBoard } from "./ats-connectors";
 import { defaultSources } from "./default-sources";
 import { excludedBoardLikes } from "./exclusions";
 import { summarizeJd } from "./jd";
@@ -43,6 +43,12 @@ export async function ensureDefaultSources(db: Db) {
   for (let index = 0; index < defaultSources.length; index += 7) {
     await db.insert(sourceBoards).values(defaultSources.slice(index, index + 7)).onConflictDoNothing();
   }
+}
+
+/** Boards an aggregator connector uncovered (e.g. a Workable account behind a jobs.workable.com hit) join the catalog as pending. */
+async function queueDiscoveredBoards(db: Db, boards: DiscoveredBoard[]) {
+  const rows = boards.map(board => ({ ...board, status: "pending", active: false }));
+  for (let index = 0; index < rows.length; index += 10) await db.insert(sourceBoards).values(rows.slice(index, index + 10)).onConflictDoNothing();
 }
 
 /** Check pending catalog boards: a board that answers becomes active, one that fails becomes invalid. */
@@ -149,6 +155,7 @@ export async function scanBoards(options: { limit?: number; since?: string; conc
     try {
       const found = await fetchBoardJobs(source);
       fetched += found.length;
+      await queueDiscoveredBoards(db, drainDiscoveredBoards());
       const result = await upsertBoardJobs(db, source, found, scanStartedAt);
       inserted += result.inserted; updated += result.updated;
     } catch (error) {

@@ -12,8 +12,47 @@ export type CanonicalJob = {
 
 type Raw = Record<string, unknown>;
 
+
+/** Boards an aggregator connector learned about while keying its rows; the pipeline drains this after each scan. */
+export type DiscoveredBoard = SourceBoard & { boardUrl: string; origin: string };
+const discoveredBoards = new Map<string, DiscoveredBoard>();
+export function drainDiscoveredBoards(): DiscoveredBoard[] {
+  const out = [...discoveredBoards.values()];
+  discoveredBoards.clear();
+  return out;
+}
+
+/**
+ * jobs.workable.com names the company but not its apply.workable.com account. Guess the account slug from the company
+ * name and website domain, and trust a guess only when that account's own listing carries the job we are holding
+ * (Workable answers 200 with an empty list for real-but-unrelated accounts, 404 for unknown ones). Cached per isolate.
+ */
+const workableAccounts = new Map<string, { slug: string; jobs: Map<string, string> } | null>();
+async function resolveWorkableAccount(company: string, website: string, title: string, allowFetch: boolean) {
+  const wanted = title.toLowerCase();
+  let entry = workableAccounts.get(company), attempted = false;
+  if (entry === undefined) {
+    if (!allowFetch) return { attempted, slug: null, shortcode: null };
+    attempted = true; entry = null;
+    const base = company.toLowerCase().replace(/[.,'&]/g, " ").replace(/\b(?:inc|llc|corp|corporation|ltd|co|group)\b/g, "").trim();
+    const domain = website.replace(/^https?:\/\/(?:www\.)?/i, "").split(/[/.]/)[0].toLowerCase();
+    const guesses = [...new Set([base.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""), base.replace(/[^a-z0-9]/g, ""), domain].filter(guess => guess.length >= 3))];
+    for (const slug of guesses) {
+      try {
+        const data = await json<{ jobs?: Raw[] }>(`https://apply.workable.com/api/v1/widget/accounts/${encodeURIComponent(slug)}`);
+        const list = data.jobs ?? [];
+        if (!list.length) continue;
+        const candidate = { slug, jobs: new Map(list.map(job => [str(job.title).toLowerCase(), str(job.shortcode) || str(job.code)])) };
+        if (candidate.jobs.has(wanted)) { entry = candidate; break; }
+      } catch { /* 404 or timeout: not this slug */ }
+    }
+    workableAccounts.set(company, entry);
+  }
+  return { attempted, slug: entry?.slug ?? null, shortcode: entry?.jobs.get(wanted) ?? null };
+}
+
 // Every connector below is a public JSON endpoint, no credentials and no HTML scraping.
-export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling", "BambooHR", "JobScore", "Oracle", "AI Jobs"];
+export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling", "BambooHR", "JobScore", "Oracle", "AI Jobs", "Workable Search"];
 
 export function boardKeyPrefix(source: SourceBoard) {
   return `${source.ats}:${source.slug}:`.toLowerCase().replace(/[^a-z0-9:]+/g, "-");
@@ -254,6 +293,50 @@ export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[
       const id = str(raw.Id) || title;
       return [canonical(source, id, title, location, `${sitePath}/job/${id}`, raw.PostedDate)];
     });
+  }
+
+  if (source.ats === "Workable Search") {
+    // jobs.workable.com is Workable's own cross-company job search; its JSON API is public. Keyword + "United States" +
+    // day_range lists every Workable-hosted US posting from the last two days, including companies whose board is not
+    // in the catalog. When the company's account slug can be confirmed the row is keyed exactly like the Workable board
+    // connector (so the two merge) and the board is queued for the catalog; otherwise the row stands on its own with
+    // the jobs.workable.com link. Account lookups are capped per scan to stay well inside the subrequest budget.
+    const queries = ["data engineer", "data scientist", "machine learning engineer", "analytics engineer", "data analyst", "business intelligence", "ai engineer", "data platform"];
+    const seen = new Set<string>();
+    const out: CanonicalJob[] = [];
+    let lookups = 0;
+    for (const query of queries) {
+      let pageToken = "";
+      for (let page = 0; page < 5; page++) {
+        const params = new URLSearchParams({ query, location: "United States", day_range: "2" });
+        if (pageToken) params.set("pageToken", pageToken);
+        const data = await json<{ jobs?: Raw[]; nextPageToken?: string }>(`https://jobs.workable.com/api/v1/jobs?${params}`);
+        for (const raw of data.jobs ?? []) {
+          const viewId = str(raw.url).match(/\/view\/([^/?#]+)/)?.[1] || str(raw.id);
+          if (!viewId || seen.has(viewId)) continue;
+          seen.add(viewId);
+          const title = str(raw.title);
+          const places = (raw.locations as unknown[] | undefined ?? []).map(str).map(place => (/telecommute/i.test(place) ? "Remote" : place)).filter(Boolean);
+          const location = places.join("; ") || (str(raw.workplace) === "remote" ? "Remote" : str(raw.location));
+          if (!keep(title, location)) continue;
+          const company = raw.company as Raw | undefined;
+          const companyName = str(company?.title) || source.companyName;
+          const jdText = [str(raw.description), str(raw.requirementsSection)].filter(Boolean).join("\n").replace(/<[^>]+>/g, " ") || undefined;
+          const account = await resolveWorkableAccount(companyName, str(company?.website), title, lookups < 30);
+          if (account.attempted) lookups++;
+          if (account.slug && account.shortcode) {
+            const board: SourceBoard = { id: `workable:${account.slug}`, ats: "Workable", slug: account.slug, companyName };
+            discoveredBoards.set(board.id, { ...board, boardUrl: `https://apply.workable.com/${account.slug}/`, origin: "workable-search" });
+            out.push({ ...canonical(board, account.shortcode, title, location, `https://apply.workable.com/${account.slug}/j/${account.shortcode}/`, raw.created), jdText });
+          } else {
+            out.push({ ...canonical({ ...source, companyName }, viewId, title, location, str(raw.url), raw.created), jdText });
+          }
+        }
+        pageToken = str(data.nextPageToken);
+        if (!pageToken) break;
+      }
+    }
+    return out;
   }
 
   if (source.ats === "AI Jobs") {
