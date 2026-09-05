@@ -109,7 +109,10 @@ async function upsertBoardJobs(db: Db, source: SourceRow, found: CanonicalJob[],
       target: jobs.canonicalKey,
       set: {
         title: sql`excluded.title`, company: sql`excluded.company`, location: sql`excluded.location`, workplace: sql`excluded.workplace`,
-        sourceUrl: sql`excluded.source_url`, applyUrl: sql`excluded.apply_url`, postedAt: sql`excluded.posted_at`, lastSeenAt: sql`excluded.last_seen_at`,
+        sourceUrl: sql`excluded.source_url`, applyUrl: sql`excluded.apply_url`, lastSeenAt: sql`excluded.last_seen_at`,
+        // Greenhouse lists only expose updated_at, so an edit would make an old post look new; keep the earliest date we
+        // have (the scorer replaces it with first_published on first sight). Other ATSs report a real posting date.
+        postedAt: sql`CASE WHEN excluded.source = 'Greenhouse' AND ${jobs.postedAt} IS NOT NULL THEN MIN(${jobs.postedAt}, excluded.posted_at) ELSE excluded.posted_at END`,
         salary: sql`COALESCE(excluded.salary, ${jobs.salary})`,
         jdSkills: sql`COALESCE(excluded.jd_skills, ${jobs.jdSkills})`, jdYears: sql`COALESCE(excluded.jd_years, ${jobs.jdYears})`, jdFlags: sql`COALESCE(excluded.jd_flags, ${jobs.jdFlags})`, jdFetchedAt: sql`COALESCE(excluded.jd_fetched_at, ${jobs.jdFetchedAt})`,
         // A job we auto-closed earlier that is back on the board becomes New again; statuses you set stay.

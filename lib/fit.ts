@@ -4,7 +4,7 @@ import { h1bSponsors, jobs } from "../db/schema";
 import { employerKey, matchSponsor, normalizeEmployer, type SponsorRow } from "./h1b";
 import { getState, setState } from "./state";
 import { classifyRole, type RoleFamily } from "./roles";
-import { fetchJobDescription } from "./ats-connectors";
+import { fetchJobDetails } from "./ats-connectors";
 import { extractSkills, hasHardBlocker, summarizeJd } from "./jd";
 import { visibleJobs } from "./visibility";
 
@@ -98,13 +98,16 @@ export async function scorePendingJobs(limit = 80) {
     await Promise.all(chunk.map(async job => {
       try {
         if (!job.jdFetchedAt) {
-          const text = await fetchJobDescription(job);
-          const jd = text ? summarizeJd(text.slice(0, 8000)) : null;
+          const details = await fetchJobDetails(job);
+          const jd = details.text ? summarizeJd(details.text.slice(0, 8000)) : null;
           Object.assign(job, { jdSkills: jd?.skills.join(", ") || null, jdYears: jd?.years ?? null, jdFlags: jd?.flags.join(",") || null, jdFetchedAt: now });
+          // Greenhouse lists only carry updated_at; the per-job call gives the true first-published date and pay range.
+          if (details.salary && !job.salary) job.salary = details.salary;
+          if (details.postedAt && (!job.postedAt || details.postedAt < job.postedAt)) job.postedAt = details.postedAt;
         }
         const sponsored = matchSponsor(job.company, byKey.get(employerKey(normalizeEmployer(job.company))) ?? []) !== null;
         const { score, reason } = computeFit({ ...job, sponsored }, candidateSkills);
-        await db.update(jobs).set({ fitScore: score, fitReason: reason, fitScoredAt: now, jdSkills: job.jdSkills, jdYears: job.jdYears, jdFlags: job.jdFlags, jdFetchedAt: job.jdFetchedAt }).where(eq(jobs.id, job.id));
+        await db.update(jobs).set({ fitScore: score, fitReason: reason, fitScoredAt: now, jdSkills: job.jdSkills, jdYears: job.jdYears, jdFlags: job.jdFlags, jdFetchedAt: job.jdFetchedAt, salary: job.salary, postedAt: job.postedAt }).where(eq(jobs.id, job.id));
         scored++;
       } catch (error) {
         failed++;

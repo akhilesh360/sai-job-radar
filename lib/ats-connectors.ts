@@ -112,33 +112,48 @@ function atsKeyFromUrl(rawUrl: string): { id: string; ats: string; slug: string;
   }
 }
 
+/** Greenhouse pay_input_ranges → "$120,000–$150,000" (USD only; other currencies are left out rather than mislabeled). */
+function formatPayRanges(ranges: unknown): string | null {
+  if (!Array.isArray(ranges)) return null;
+  const usd = (ranges as Raw[]).filter(range => str(range.currency_type).toUpperCase() === "USD" && (range.min_cents || range.max_cents));
+  if (!usd.length) return null;
+  const dollars = (cents: unknown) => `$${Math.round(Number(cents) / 100).toLocaleString("en-US")}`;
+  const min = Math.min(...usd.map(range => Number(range.min_cents || range.max_cents)));
+  const max = Math.max(...usd.map(range => Number(range.max_cents || range.min_cents)));
+  return min === max ? dollars(min) : `${dollars(min)}–${dollars(max)}`;
+}
+
+export type JobDetails = { text: string | null; salary?: string | null; postedAt?: string | null };
+
 /**
- * Fetch one job's description for boards whose list payload lacks it. Returns null when the ATS has no per-job endpoint
- * we can read (Rippling, Oracle, aggregator rows) or the job is gone. Used by the fit scorer, at most once per job.
+ * Fetch one job's description (plus, where the ATS exposes them, its pay range and true first-published date) for
+ * boards whose list payload lacks them. `text` is null when the ATS has no per-job endpoint we can read (Rippling,
+ * Oracle, aggregator rows) or the job is gone. Used by the fit scorer, at most once per job.
  */
-export async function fetchJobDescription(job: { source: string; applyUrl: string; externalJobId: string | null }): Promise<string | null> {
+export async function fetchJobDetails(job: { source: string; applyUrl: string; externalJobId: string | null }): Promise<JobDetails> {
   try {
     const url = new URL(job.applyUrl), parts = url.pathname.split("/").filter(Boolean).map(part => decodeURIComponent(part));
     if (job.source === "Greenhouse" && /greenhouse\.io$/.test(url.hostname) && parts[1] === "jobs" && parts[2]) {
-      const data = await json<{ content?: string }>(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(parts[0])}/jobs/${encodeURIComponent(parts[2])}`);
-      return str(data.content) || null;
+      // The list endpoint only carries updated_at; the per-job one has first_published and (opt-in) pay ranges.
+      const data = await json<{ content?: string; first_published?: string; pay_input_ranges?: unknown }>(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(parts[0])}/jobs/${encodeURIComponent(parts[2])}?pay_transparency=true`);
+      return { text: str(data.content) || null, salary: formatPayRanges(data.pay_input_ranges), postedAt: iso(data.first_published) };
     }
     if (job.source === "Workable" && url.hostname === "apply.workable.com" && parts[1] === "j" && parts[2]) {
       const data = await json<{ description?: string; requirements?: string }>(`https://apply.workable.com/api/v2/accounts/${encodeURIComponent(parts[0])}/jobs/${encodeURIComponent(parts[2])}`);
-      return [str(data.description), str(data.requirements)].filter(Boolean).join("\n") || null;
+      return { text: [str(data.description), str(data.requirements)].filter(Boolean).join("\n") || null };
     }
     if (job.source === "SmartRecruiters" && url.hostname === "jobs.smartrecruiters.com" && parts[0] && parts[1]) {
       const data = await json<{ jobAd?: { sections?: Record<string, { text?: string }> } }>(`https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(parts[0])}/postings/${encodeURIComponent(parts[1].split("-")[0])}`);
       const sections = data.jobAd?.sections ?? {};
-      return [sections.jobDescription?.text, sections.qualifications?.text, sections.additionalInformation?.text].map(str).filter(Boolean).join("\n") || null;
+      return { text: [sections.jobDescription?.text, sections.qualifications?.text, sections.additionalInformation?.text].map(str).filter(Boolean).join("\n") || null };
     }
     if (job.source === "BambooHR" && /\.bamboohr\.com$/.test(url.hostname) && parts[0] === "careers" && parts[1]) {
       const data = await json<{ result?: { jobOpening?: { description?: string } } }>(`https://${url.hostname}/careers/${encodeURIComponent(parts[1])}/detail`);
-      return str(data.result?.jobOpening?.description) || null;
+      return { text: str(data.result?.jobOpening?.description) || null };
     }
-    return null;
+    return { text: null };
   } catch {
-    return null;
+    return { text: null };
   }
 }
 
