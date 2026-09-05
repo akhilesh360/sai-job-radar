@@ -364,7 +364,7 @@ export default function Home() {
         </div>
         <div className="table-wrap">
           <table className="jobs-table">
-            <thead><tr><th>ROLE</th><th>LOCATION</th><th>SOURCE</th><th>POSTED / FOUND</th><th>STATUS</th><th><span className="sr-only">Action</span></th></tr></thead>
+            <thead><tr><th>ROLE</th><th>LOCATION</th><th>SOURCE</th><th>POSTED</th><th>STATUS</th><th><span className="sr-only">Action</span></th></tr></thead>
             <tbody>
               {filtered.map(job => {
                 const isNew = now - new Date(job.discoveredAt).getTime() < 86400000;
@@ -391,7 +391,7 @@ export default function Home() {
                   </div></div></td>
                   <td><strong className="plain-strong">{job.location}</strong><span className={`workplace ${job.workplace.toLowerCase()}`}>{job.workplace}</span></td>
                   <td><span className="source-pill">{job.source}</span></td>
-                  <td><strong className="time-main">{job.postedAt ? `Posted ${relativeTime(job.postedAt)}` : "Post date unknown"}</strong><span className="time-sub">Found {relativeTime(job.discoveredAt)} · Seen {relativeTime(job.lastSeenAt)}</span></td>
+                  <td><strong className="time-main" title={`Posted: ${job.postedAt ? new Date(job.postedAt).toLocaleString() : "not provided by the job board"}\nFirst seen by the radar: ${new Date(job.discoveredAt).toLocaleString()}\nLast confirmed on the board: ${new Date(job.lastSeenAt).toLocaleString()}`}>{job.postedAt ? `Posted ${relativeTime(job.postedAt)}` : `Added ${relativeTime(job.discoveredAt)}`}</strong>{job.postedAt && (new Date(job.discoveredAt).getTime() - new Date(job.postedAt).getTime()) > 2 * 86400000 && <span className="time-sub">Added to radar {relativeTime(job.discoveredAt)}</span>}</td>
                   <td><select className={`status-select status-${job.status.toLowerCase()}`} value={job.status} onChange={event => void updateStatus(job.id, event.target.value as Status)} aria-label={`Status for ${job.title}`}>{statuses.map(item => <option key={item}>{item}</option>)}</select></td>
                   <td><a className="apply-link" href={job.applyUrl} target="_blank" rel="noreferrer">Apply <Icon name="external" /></a></td>
                 </tr>;
