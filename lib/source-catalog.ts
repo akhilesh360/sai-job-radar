@@ -12,6 +12,7 @@ import seedSources8 from "../data/source-seeds-8.json"; // boards behind Simplif
 import seedSources9 from "../data/source-seeds-9.json"; // Y Combinator companies hiring in the US, boards resolved by scripts/resolve-yc-boards.mjs
 import seedSources10 from "../data/source-seeds-10.json"; // boards behind artificialintelligencejobs.co US listings
 import seedSources11 from "../data/source-seeds-11.json"; // SmartRecruiters boards with US postings from the owner's old scraper lists (2026-09)
+import seedSources12 from "../data/source-seeds-12.json"; // boards behind the owner's saved application links (2026-09)
 
 const seedSources = [
   ...seedSources1,
@@ -25,6 +26,7 @@ const seedSources = [
   ...seedSources9,
   ...seedSources10,
   ...seedSources11,
+  ...seedSources12,
 ];
 
 const progressKey = "seed_catalog_offset";
