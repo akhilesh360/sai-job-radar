@@ -21,7 +21,7 @@ export async function sendFitAlerts() {
   const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
   const candidates = await db.select().from(jobs)
     .where(and(eq(jobs.status, "New"), gte(jobs.fitScore, MIN_ALERT_SCORE), gt(jobs.fitScoredAt, since), visibleJobs))
-    .orderBy(desc(jobs.fitScore), desc(jobs.discoveredAt)).limit(60);
+    .orderBy(desc(jobs.fitScoredAt), desc(jobs.fitScore)).limit(60); // newest matches first: a fresh 76 must not wait behind old 90s
   if (!candidates.length) return { configured: true as const, sent: 0, failed: 0 };
   // Only successful deliveries block a re-send; a failed attempt is retried on the next pass.
   const already = new Set((await db.select({ jobId: alertDeliveries.jobId }).from(alertDeliveries)
