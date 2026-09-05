@@ -21,22 +21,25 @@ export async function sendFitAlerts() {
     .where(and(eq(jobs.status, "New"), gte(jobs.fitScore, MIN_ALERT_SCORE), gt(jobs.fitScoredAt, since), visibleJobs))
     .orderBy(desc(jobs.fitScore), desc(jobs.discoveredAt)).limit(60);
   if (!candidates.length) return { configured: true as const, sent: 0, failed: 0 };
+  // Only successful deliveries block a re-send; a failed attempt is retried on the next pass.
   const already = new Set((await db.select({ jobId: alertDeliveries.jobId }).from(alertDeliveries)
-    .where(and(eq(alertDeliveries.channel, "ntfy"), inArray(alertDeliveries.jobId, candidates.map(job => job.id))))).map(row => row.jobId));
+    .where(and(eq(alertDeliveries.channel, "ntfy"), eq(alertDeliveries.deliveryStatus, "sent"), inArray(alertDeliveries.jobId, candidates.map(job => job.id))))).map(row => row.jobId));
   let sent = 0, failed = 0;
   for (const job of candidates.filter(job => !already.has(job.id)).slice(0, MAX_PER_RUN)) {
     const reason = (job.fitReason ?? "").split(/\n|;/)[0].trim();
     const body = [`${job.company} · ${job.location}${job.salary ? ` · ${job.salary}` : ""}`, reason].filter(Boolean).join("\n");
     let ok = false;
     try {
-      const response = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
+      // JSON publish mode: header values cannot carry characters like "·" or "—", the JSON body can.
+      const response = await fetch("https://ntfy.sh", {
         method: "POST",
-        headers: { Title: `${job.fitScore} · ${job.title}`.slice(0, 200), Click: job.applyUrl, Tags: (job.fitScore ?? 0) >= 90 ? "star,briefcase" : "briefcase", Priority: (job.fitScore ?? 0) >= 90 ? "high" : "default" },
-        body,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ topic, title: `${job.fitScore} · ${job.title}`.slice(0, 200), message: body, click: job.applyUrl, tags: (job.fitScore ?? 0) >= 90 ? ["star", "briefcase"] : ["briefcase"], priority: (job.fitScore ?? 0) >= 90 ? 4 : 3 }),
       });
       ok = response.ok;
     } catch { ok = false; }
     if (ok) sent++; else failed++;
+    await db.delete(alertDeliveries).where(and(eq(alertDeliveries.jobId, job.id), eq(alertDeliveries.channel, "ntfy")));
     await db.insert(alertDeliveries).values({ jobId: job.id, channel: "ntfy", deliveryStatus: ok ? "sent" : "failed" }).onConflictDoNothing();
   }
   return { configured: true as const, sent, failed };
