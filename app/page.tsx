@@ -96,7 +96,8 @@ export default function Home() {
   const [source, setSource] = useState("All sources");
   const [workplace, setWorkplace] = useState("All locations");
   const [statusFilter, setStatusFilter] = useState("Open");
-  const [sort, setSort] = useState("Newest first");
+  const [sort, setSort] = useState("Fit: high → low");
+  const [minFit, setMinFit] = useState("Any score");
   const [sponsor, setSponsor] = useState("Any sponsorship");
   const [profile, setProfile] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
@@ -128,7 +129,7 @@ export default function Home() {
         setNotice(`Scored ${total} jobs so far… ${result.remaining.toLocaleString()} to go (the rest continue every 5 minutes in the background).`);
         if (result.remaining === 0) break;
       }
-      setSort("Best fit first");
+      setSort("Fit: high → low");
       await loadJobs();
     } catch (error) {
       setNotice(`Scoring stopped (${error instanceof Error ? error.message : "unknown error"}). It resumes automatically every 5 minutes.`);
@@ -254,18 +255,21 @@ export default function Home() {
         && (workplace === "All locations" || job.workplace === workplace)
         && (sponsor === "Any sponsorship" || job.h1b !== null)
         && !/citizens-only|clearance/.test(job.jdFlags ?? "") && !/clearance|citizen|TS\/SCI/i.test(job.title)
+        && (minFit === "Any score" || (job.fitScore ?? -1) >= Number.parseInt(minFit, 10))
         && ageHours <= recencyHours[recency];
     }).sort((a, b) => {
       const av = new Date(a.postedAt ?? a.discoveredAt).getTime(), bv = new Date(b.postedAt ?? b.discoveredAt).getTime();
-      if (sort === "Best fit first") {
-        // Unscored and failed (-1) jobs sink to the bottom; ties break by recency.
+      if (sort.startsWith("Fit:")) {
+        // Unscored and failed (-1) jobs sink to the bottom either way; ties break by recency.
         const af = a.fitScore ?? -2, bf = b.fitScore ?? -2;
-        if (af !== bf) return bf - af;
+        const aUnscored = af < 0, bUnscored = bf < 0;
+        if (aUnscored !== bUnscored) return aUnscored ? 1 : -1;
+        if (af !== bf) return sort === "Fit: high → low" ? bf - af : af - bf;
         return bv - av;
       }
       return sort === "Newest first" ? bv - av : av - bv;
     });
-  }, [jobs, query, role, source, workplace, recency, statusFilter, sort, sponsor, now]);
+  }, [jobs, query, role, source, workplace, recency, statusFilter, sort, sponsor, minFit, now]);
 
   const openJobs = jobs.filter(job => !closedStatuses.includes(job.status));
   const newCount = openJobs.filter(job => job.status === "New").length;
@@ -344,7 +348,8 @@ export default function Home() {
           <select value={source} onChange={event => setSource(event.target.value)} aria-label="Filter by source"><option>All sources</option><option>Google finds</option>{sources.map(item => <option key={item}>{item}</option>)}</select>
           <select value={workplace} onChange={event => setWorkplace(event.target.value)} aria-label="Filter by workplace"><option>All locations</option><option>Remote</option><option>Hybrid</option><option>Onsite</option></select>
           <select value={sponsor} onChange={event => setSponsor(event.target.value)} aria-label="Filter by visa sponsorship"><option>Any sponsorship</option><option>H-1B sponsors only</option></select>
-          <select value={sort} onChange={event => setSort(event.target.value)} aria-label="Sort jobs"><option>Best fit first</option><option>Newest first</option><option>Oldest first</option></select>
+          <select value={minFit} onChange={event => setMinFit(event.target.value)} aria-label="Minimum fit score"><option>Any score</option><option>80+ fit</option><option>60+ fit</option><option>40+ fit</option></select>
+          <select value={sort} onChange={event => setSort(event.target.value)} aria-label="Sort jobs"><option>Fit: high → low</option><option>Fit: low → high</option><option>Newest first</option><option>Oldest first</option></select>
         </div>
         <div className="table-wrap">
           <table className="jobs-table">
