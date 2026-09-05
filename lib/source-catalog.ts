@@ -49,8 +49,9 @@ export async function importSourceSeedBatch(offset:number,limit:number){
   const batch=seedSources.slice(safeOffset,safeOffset+safeLimit);
   if(batch.length){
     const db=getDb();
-    for(let index=0;index<batch.length;index+=10){
-      await db.insert(sourceBoards).values(batch.slice(index,index+10).map(source=>({...source,status:"pending",active:false}))).onConflictDoNothing();
+    // D1 allows 100 bound parameters per statement; a source_boards row binds 11 (8 values + 3 numeric defaults), so 8 rows max.
+    for(let index=0;index<batch.length;index+=8){
+      await db.insert(sourceBoards).values(batch.slice(index,index+8).map(source=>({...source,status:"pending",active:false}))).onConflictDoNothing();
     }
   }
   const nextOffset=safeOffset+batch.length;

@@ -237,7 +237,8 @@ export async function discoverNewBoards() {
 
   // 1. New company boards → pending; the scheduled run validates and scans them immediately after.
   const rows = [...newBoards.values()].map(source => ({ id: source.id, ats: source.ats, slug: source.slug, companyName: source.companyName, boardUrl: source.boardUrl, origin: source.origin, status: "pending", active: false }));
-  for (let index = 0; index < rows.length; index += 10) await db.insert(sourceBoards).values(rows.slice(index, index + 10)).onConflictDoNothing();
+  // D1 allows 100 bound parameters per statement; a source_boards row binds 11 (8 values + 3 numeric defaults), so 8 rows max.
+  for (let index = 0; index < rows.length; index += 8) await db.insert(sourceBoards).values(rows.slice(index, index + 8)).onConflictDoNothing();
   // 2. Known boards with a fresh Google hit → scan first (NULL last_scanned_at sorts first).
   const bump = [...seenBoards];
   for (let index = 0; index < bump.length; index += 90) await db.update(sourceBoards).set({ lastScannedAt: null }).where(inArray(sourceBoards.id, bump.slice(index, index + 90)));

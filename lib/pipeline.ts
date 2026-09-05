@@ -48,7 +48,8 @@ export async function ensureDefaultSources(db: Db) {
 /** Boards an aggregator connector uncovered (e.g. a Workable account behind a jobs.workable.com hit) join the catalog as pending. */
 async function queueDiscoveredBoards(db: Db, boards: DiscoveredBoard[]) {
   const rows = boards.map(board => ({ ...board, status: "pending", active: false }));
-  for (let index = 0; index < rows.length; index += 10) await db.insert(sourceBoards).values(rows.slice(index, index + 10)).onConflictDoNothing();
+  // D1 allows 100 bound parameters per statement; a source_boards row binds 11 (8 values + 3 numeric defaults), so 8 rows max.
+  for (let index = 0; index < rows.length; index += 8) await db.insert(sourceBoards).values(rows.slice(index, index + 8)).onConflictDoNothing();
 }
 
 /** Check pending catalog boards: a board that answers becomes active, one that fails becomes invalid. */
