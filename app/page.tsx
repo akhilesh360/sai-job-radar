@@ -27,6 +27,16 @@ const statuses: Status[] = ["New", "Saved", "Applied", "Interview", "Rejected", 
 const closedStatuses: Status[] = ["Archived", "Rejected", "Closed"];
 const recencyHours: Record<string, number> = { "1 hour": 1, "6 hours": 6, "12 hours": 12, "24 hours": 24 };
 
+/** "Today, 2:15 PM" · "Yesterday, 9:40 AM" · "Sep 3, 9:40 AM" · "Sep 3" when the source gave only a date (midnight UTC). */
+function absoluteTime(iso: string) {
+  const d = new Date(iso);
+  const dateOnly = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0;
+  const now = new Date(), startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const day = d.getTime() >= startToday ? "Today" : d.getTime() >= startToday - 86400000 ? "Yesterday" : d.toLocaleDateString([], { month: "short", day: "numeric", ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}) });
+  if (dateOnly) return d.getTime() >= startToday - 86400000 ? day : d.toLocaleDateString([], { month: "short", day: "numeric", timeZone: "UTC" });
+  return `${day}, ${d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+}
+
 function relativeTime(iso: string) {
   const diff = Math.max(0, Date.now() - new Date(iso).getTime());
   const hours = Math.floor(diff / 3600000);
@@ -391,7 +401,7 @@ export default function Home() {
                   </div></div></td>
                   <td><strong className="plain-strong">{job.location}</strong><span className={`workplace ${job.workplace.toLowerCase()}`}>{job.workplace}</span></td>
                   <td><span className="source-pill">{job.source}</span></td>
-                  <td><strong className="time-main" title={`Posted: ${job.postedAt ? new Date(job.postedAt).toLocaleString() : "not provided by the job board"}\nFirst seen by the radar: ${new Date(job.discoveredAt).toLocaleString()}\nLast confirmed on the board: ${new Date(job.lastSeenAt).toLocaleString()}`}>{job.postedAt ? `Posted ${relativeTime(job.postedAt)}` : `Added ${relativeTime(job.discoveredAt)}`}</strong>{job.postedAt && (new Date(job.discoveredAt).getTime() - new Date(job.postedAt).getTime()) > 2 * 86400000 && <span className="time-sub">Added to radar {relativeTime(job.discoveredAt)}</span>}</td>
+                  <td><strong className="time-main" title={`Posted: ${job.postedAt ? new Date(job.postedAt).toLocaleString() : "not provided by the job board"}\nFirst seen by the radar: ${new Date(job.discoveredAt).toLocaleString()}\nLast confirmed on the board: ${new Date(job.lastSeenAt).toLocaleString()}`}>{job.postedAt ? `Posted ${relativeTime(job.postedAt)}` : `Added ${relativeTime(job.discoveredAt)}`}</strong><span className="time-sub">{absoluteTime(job.postedAt ?? job.discoveredAt)}{job.postedAt && (new Date(job.discoveredAt).getTime() - new Date(job.postedAt).getTime()) > 2 * 86400000 ? ` · added to radar ${relativeTime(job.discoveredAt)}` : ""}</span></td>
                   <td><select className={`status-select status-${job.status.toLowerCase()}`} value={job.status} onChange={event => void updateStatus(job.id, event.target.value as Status)} aria-label={`Status for ${job.title}`}>{statuses.map(item => <option key={item}>{item}</option>)}</select></td>
                   <td><a className="apply-link" href={job.applyUrl} target="_blank" rel="noreferrer">Apply <Icon name="external" /></a></td>
                 </tr>;
