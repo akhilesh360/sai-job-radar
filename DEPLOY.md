@@ -124,3 +124,14 @@ the distinct employers (a markdown table or CSV with an Employer column), then:
 node scripts/load-lca-employers.mjs path/to/employers.md 2025
 npx wrangler d1 execute sai-job-radar --remote --file data/h1b-lca-2025.sql -y
 ```
+
+For the full per-year stats (LCA counts, data-role counts, wage quartiles — what the badge and hover show), download the
+quarterly `LCA_Disclosure_Data_FY<year>_Q<n>.xlsx` files into a folder, aggregate them with a streaming pass over the
+xlsx (`scripts/aggregate-lca.py`, needs only `openpyxl`: certified H-1B cases, deduplicated by case number within a
+fiscal year), producing `lca_agg.csv` with the columns `employer, fy, lcas, positions,
+data_lcas, data_wage_p25, data_wage_median, data_wage_p75, top_states, top_data_titles`. Then:
+
+```bash
+node scripts/load-lca-stats.mjs path/to/lca_agg.csv
+npx wrangler d1 execute sai-job-radar --remote --file data/h1b-lca-stats.sql -y
+```
