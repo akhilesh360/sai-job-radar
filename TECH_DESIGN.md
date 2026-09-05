@@ -31,6 +31,7 @@ flowchart TB
     ATS["Company ATS JSON feeds<br/>Greenhouse · Ashby · Lever · SmartRecruiters · Workable<br/>Rippling · Recruitee · Breezy · Pinpoint · BambooHR<br/>JobScore · Oracle HCM · Gem · Phenom"]
     AGG["Cross-company feeds<br/>Workable Search · Amazon Jobs<br/>Hacker News Who-is-hiring · AI Jobs"]
     OJD["openjobdata.com daily delta<br/>(Hugging Face parquet)"]
+    JPX["JobsPipe API<br/>(sponsor-stance query, daily)"]
     SERP["Serper (Google Search API)"]
     AI["Workers AI · Llama 3.1 8B"]
   end
@@ -54,6 +55,8 @@ flowchart TB
   CONN --> AGG
   CRON --> DISC --> SERP
   CRON --> OJDS --> OJD
+  CRON --> JPS["lib/jobspipe.ts"] --> JPX
+  JPS --> D1
   CRON --> FIT --> AI
   CRON --> AL --> SLACK
   PIPE --> D1
@@ -74,7 +77,7 @@ flowchart TB
 | Scheduler | Workers Cron Trigger `*/5 * * * *` | 288 maintenance runs a day |
 | Database | Cloudflare D1 (SQLite) via drizzle-orm | Jobs, boards, registries, run logs, key/value state |
 | LLM | Workers AI (`@cf/meta/llama-3.1-8b-instruct`) | Fit score 0–100 per job |
-| Secrets | Workers Secrets | `SERPER_API_KEY`, `SLACK_WEBHOOK_URL`, optional `SLACK_MENTION`, `NTFY_TOPIC` |
+| Secrets | Workers Secrets | `SERPER_API_KEY`, `SLACK_WEBHOOK_URL`, `JOBSPIPE_API_KEY`, optional `SLACK_MENTION`, `NTFY_TOPIC` |
 | Search | Serper.dev | Discovery of boards Google indexed in the last 24 h |
 | Company registry | openjobdata.com public dataset (109k companies, detected ATS) | Seeding + mapping delta rows to boards |
 | Build / deploy | `npx vinext build` → `npx wrangler deploy --config dist/server/wrangler.json` | One command from a laptop |
@@ -93,7 +96,8 @@ flowchart TD
   E --> F["scanBoards(400, scheduled)<br/>350 productive boards due after 14 min<br/>50 quiet boards due after 24 h"]
   F --> G["per board: fetch feed → title/US filter → upsert → close vanished"]
   G --> H["syncOpenJobData()<br/>hourly ETag check of today's delta parquet"]
-  H --> I["scorePendingJobs(80)<br/>fetch JD → skills/years/flags → LLM fit score"]
+  H --> H2["syncJobsPipe()<br/>daily: US data roles whose posting says it sponsors"]
+  H2 --> I["scorePendingJobs(80)<br/>fetch JD → skills/years/flags → LLM fit score"]
   I --> J["sendFitAlerts()<br/>score ≥ 75 · posted ≤ 24 h · not sent · not a 30-day re-post"]
   J --> K["One Slack digest (table, ≤ 25 rows)"]
 ```
@@ -193,6 +197,7 @@ company + title + location rows keeping the newest; reloads every 5 minutes.
 | Hacker News | Algolia `search_by_date` for the monthly Who-is-hiring thread | queues boards it links to |
 | AI Jobs | artificialintelligencejobs.co JSON | queues unknown boards |
 | openjobdata | `huggingface.co/buckets/Invicto69/Jobs-Dataset-bucket/resolve/data/minimal/changes/{day}.parquet` | hyparquet in the Worker |
+| JobsPipe (sponsors) | `POST api.jobspipe.dev/v1/jobs/search` (bearer key) | one query a day: data titles · US · `visa_sponsorship_or: ["offers"]` · last 2 days · 25 rows; ≈50–100 credits/month of the free 1,000. Tested 2026-09-05: its general stream is LinkedIn/Indeed copies, ~30% new vs the radar, too big for the free tier — not used |
 
 Evaluated and rejected (no public JSON or bot walls): Greenhouse candidate search, Remotive, RemoteOK, Himalayas,
 Gusto, Comeet, Dover, JazzHR, Jobvite, Paylocity, Dayforce, SuccessFactors sites (EY, Wipro, HCL, NTT Data),

@@ -99,7 +99,7 @@ const joinParts = (...parts: unknown[]) => parts.map(str).map(part => part.trim(
  * When an aggregator hands us a link into a board we read directly, key the job exactly as that connector would, so the
  * two sources merge into one row instead of duplicating it. Returns null for hosts we do not read.
  */
-function atsKeyFromUrl(rawUrl: string): { id: string; ats: string; slug: string; jobId: string } | null {
+export function atsKeyFromUrl(rawUrl: string): { id: string; ats: string; slug: string; jobId: string } | null {
   try {
     const url = new URL(rawUrl), host = url.hostname.toLowerCase(), parts = url.pathname.split("/").filter(Boolean).map(part => decodeURIComponent(part));
     let ats = "", slug = "", jobId = "";
