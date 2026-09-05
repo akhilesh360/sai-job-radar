@@ -2,7 +2,9 @@
 import csv, glob, os, re, statistics, sys, time
 import openpyxl
 D = os.path.expanduser("~/h1b-data"); OUT = f"{D}/lca_agg.csv"
-files = sorted(glob.glob(f"{D}/LCA_Disclosure_Data_FY20??_Q?.xlsx"), key=lambda f: (re.search(r"FY(\d{4})", f).group(1), re.search(r"_Q(\d)", f).group(1)))
+# Optional: pass specific files (e.g. a new quarter) and an output path: aggregate-lca.py OUT.csv FILE.xlsx [FILE.xlsx …]
+if len(sys.argv) > 2: OUT, files = sys.argv[1], sorted(sys.argv[2:], key=lambda f: (re.search(r"FY(\d{4})", f).group(1), re.search(r"_Q(\d)", f).group(1)))
+else: files = sorted(glob.glob(f"{D}/LCA_Disclosure_Data_FY20??_Q?.xlsx"), key=lambda f: (re.search(r"FY(\d{4})", f).group(1), re.search(r"_Q(\d)", f).group(1)))
 DATA_ROLE = re.compile(r"data (?:engineer|scientist|analyst|architect|platform)|analytics|machine learning|\bml\b|\bai\b|artificial intelligence|business intelligence|\betl\b|big data|data warehouse|\bdatabricks\b|\bspark\b|statistic", re.I)
 UNIT = {"Year": 1, "Month": 12, "Bi-Weekly": 26, "Week": 52, "Hour": 2080}
 agg = {}      # (employer_raw, fy) → dict
