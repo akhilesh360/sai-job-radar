@@ -1,17 +1,19 @@
 /**
  * Dead-letter queue for source boards.
  *
- * A board that fails validation or repeatedly fails a scan is not thrown away: it is parked with a reason code and a
- * retry time. The cron re-probes due boards on a backoff schedule; a board that answers again goes straight back to
- * active, one that keeps failing is eventually marked dead (never probed again, still visible for inspection).
+ * A board that fails validation or repeatedly fails a scan is parked with a reason code and a retry time. The cron
+ * re-probes due boards weekly; a board that answers again goes straight back to active. One whose schedule runs out is
+ * marked dead and the next cron run deletes the row — the owner does not want dead boards kept (2026-09-05). A board
+ * the ATS says is gone (404/410) gets exactly one re-check a week later before it is removed.
  */
 export type FailureKind = "gone" | "blocked" | "transient" | "parse" | "excluded" | "unsupported";
 
 const HOUR = 60 * 60 * 1000;
 
 /**
- * Retry policy: every parked board is re-probed once a week, for up to eight weeks, then marked dead. Policy exclusions
- * and unsupported ATSs are dead at once. (A flat weekly cadence keeps the cron load predictable: ~5,000 parked boards
+ * Retry policy: blocked / transient / parse failures are re-probed once a week for up to eight weeks, then marked dead.
+ * A 404/410 ("gone") board is re-checked once, a week later, then marked dead. Policy exclusions and unsupported ATSs
+ * are dead at once. Dead rows are deleted by the next cron run. (A flat weekly cadence keeps the cron load predictable: ~5,000 parked boards
  * spread over a week is ~30 probes per hour.)
  */
 const WEEK_HOURS = 168;
@@ -20,7 +22,7 @@ const RETRY_SCHEDULE: Record<FailureKind, number[]> = {
   transient: Array(MAX_WEEKLY_RETRIES).fill(WEEK_HOURS),
   blocked: Array(MAX_WEEKLY_RETRIES).fill(WEEK_HOURS),
   parse: Array(MAX_WEEKLY_RETRIES).fill(WEEK_HOURS),
-  gone: Array(MAX_WEEKLY_RETRIES).fill(WEEK_HOURS),
+  gone: [WEEK_HOURS],
   excluded: [],
   unsupported: [],
 };

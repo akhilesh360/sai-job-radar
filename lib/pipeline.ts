@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, like, lt, not, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, like, lt, not, or, sql, isNotNull } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDb } from "../db";
 import { ingestionRuns, jobs, sourceBoards } from "../db/schema";
@@ -180,16 +180,18 @@ export async function scanBoards(options: { limit?: number; since?: string; conc
 
 /**
  * Re-probe dead-letter boards that are due (`next_retry_at` in the past). A board that answers is reactivated; one
- * that fails again is pushed further out on its backoff schedule or marked dead once the schedule is exhausted.
- * `force` ignores `next_retry_at` (used for a full manual re-check) but never touches boards already marked dead.
+ * that fails again waits for its next weekly slot, or is deleted once its schedule is exhausted (the owner does not
+ * want dead boards kept). Rows already marked dead by validation (policy exclusions) are swept out here too.
+ * `force` ignores `next_retry_at` (used for a full manual re-check).
  */
 export async function retryDeadLetter(limit = 40, concurrency = 8, force = false) {
   const db = getDb();
   const at = now();
   const parked = and(inArray(sourceBoards.status, ["invalid", "error"]), isNull(sourceBoards.deadAt), inArray(sourceBoards.ats, enabledAts), notExcluded);
   const due = force ? parked : and(parked, or(isNull(sourceBoards.nextRetryAt), lt(sourceBoards.nextRetryAt, at)));
+  const swept = await db.delete(sourceBoards).where(isNotNull(sourceBoards.deadAt)).returning({ id: sourceBoards.id });
   const boards = await db.select().from(sourceBoards).where(due).orderBy(asc(sourceBoards.nextRetryAt), asc(sourceBoards.id)).limit(Math.min(120, Math.max(1, limit)));
-  let recovered = 0, failedAgain = 0, dead = 0;
+  let recovered = 0, failedAgain = 0, removed = swept.length;
   const updates: Statement[] = [];
   await mapWithConcurrency(boards, concurrency, async source => {
     const probedAt = now();
@@ -200,8 +202,8 @@ export async function retryDeadLetter(limit = 40, concurrency = 8, force = false
     } catch (error) {
       const message = error instanceof Error ? error.message : "Retry failed";
       const fields = deadLetterFields(message, source.retryCount + 1);
-      if (fields.deadAt) dead++; else failedAgain++;
-      updates.push(db.update(sourceBoards).set({ lastValidatedAt: probedAt, lastError: message, ...fields, updatedAt: probedAt }).where(eq(sourceBoards.id, source.id)));
+      if (fields.deadAt) { removed++; updates.push(db.delete(sourceBoards).where(eq(sourceBoards.id, source.id))); }
+      else { failedAgain++; updates.push(db.update(sourceBoards).set({ lastValidatedAt: probedAt, lastError: message, ...fields, updatedAt: probedAt }).where(eq(sourceBoards.id, source.id))); }
     }
   });
   if (updates.length) await runBatch(db, updates);
@@ -209,9 +211,13 @@ export async function retryDeadLetter(limit = 40, concurrency = 8, force = false
     const previous = Number(await getState(db, "dlq_recovered_total")) || 0;
     await setState(db, "dlq_recovered_total", String(previous + recovered));
   }
+  if (removed) {
+    const previous = Number(await getState(db, "dlq_removed_total")) || 0;
+    await setState(db, "dlq_removed_total", String(previous + removed));
+  }
   if (boards.length) await setState(db, "dlq_last_retry_at", at);
   const remainingRows = await db.select({ count: sql<number>`count(*)` }).from(sourceBoards).where(due);
-  return { probed: boards.length, recovered, failedAgain, dead, remaining: Number(remainingRows[0]?.count ?? 0) };
+  return { probed: boards.length, recovered, failedAgain, removed, remaining: Number(remainingRows[0]?.count ?? 0) };
 }
 
 
@@ -236,5 +242,5 @@ export async function deadLetterSummary() {
     .where(and(inArray(sourceBoards.status, ["invalid", "error"]), isNull(sourceBoards.deadAt), gt(sourceBoards.nextRetryAt, at)));
   const sample = await db.select({ id: sourceBoards.id, companyName: sourceBoards.companyName, ats: sourceBoards.ats, failureKind: sourceBoards.failureKind, lastError: sourceBoards.lastError, retryCount: sourceBoards.retryCount, nextRetryAt: sourceBoards.nextRetryAt, deadAt: sourceBoards.deadAt })
     .from(sourceBoards).where(and(inArray(sourceBoards.status, ["invalid", "error"]), isNull(sourceBoards.deadAt), not(eq(sourceBoards.failureKind, "gone")))).orderBy(desc(sourceBoards.updatedAt)).limit(25);
-  return { waiting, dead, dueNow: Number(dueRows[0]?.count ?? 0), nextRetryAt: nextRows[0]?.next ?? null, byKind, lastRetryAt: await getState(db, "dlq_last_retry_at"), recoveredTotal: Number(await getState(db, "dlq_recovered_total")) || 0, sample };
+  return { waiting, dead, dueNow: Number(dueRows[0]?.count ?? 0), nextRetryAt: nextRows[0]?.next ?? null, byKind, lastRetryAt: await getState(db, "dlq_last_retry_at"), recoveredTotal: Number(await getState(db, "dlq_recovered_total")) || 0, removedTotal: Number(await getState(db, "dlq_removed_total")) || 0, sample };
 }

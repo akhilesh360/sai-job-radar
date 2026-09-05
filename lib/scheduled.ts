@@ -12,7 +12,7 @@ import { scorePendingJobs } from "./fit";
  *      "Google search" button instead, so Serper credits are spent only when you ask.
  *   2. Validate pending boards (newly discovered ones first).
  *   2b. Re-probe up to 40 dead-letter boards whose weekly retry is due (lib/dead-letter.ts); ones that answer
- *       rejoin the scan rotation, ones that keep failing wait another week (dead after eight weeks).
+ *       rejoin the scan rotation, 404s are removed after one failed re-check, other failures after eight weeks.
  *   3. Scan boards that are due: bumped/new boards first, then productive boards not read in the last
  *      14 minutes (400 per run — 1,200 boards per 15 minutes), then quiet boards older than a day.
  */
@@ -28,7 +28,7 @@ export async function runScheduledMaintenance() {
   const discovery = discoveryDue ? await discoverNewBoards() : null;
   const validation = await validatePendingSources(60);
   // A dead-letter problem must never stop the scan.
-  const deadLetter = await retryDeadLetter(40).catch(error => ({ probed: 0, recovered: 0, failedAgain: 0, dead: 0, remaining: -1, error: error instanceof Error ? error.message : String(error) }));
+  const deadLetter = await retryDeadLetter(40).catch(error => ({ probed: 0, recovered: 0, failedAgain: 0, removed: 0, remaining: -1, error: error instanceof Error ? error.message : String(error) }));
   const since = new Date(Date.now() - 14 * 60 * 1000).toISOString();
   // 400 boards ≈ 4 s CPU / 25 s wall on Workers Paid; measured under the 1,000-subrequest ceiling.
   const scan = await scanBoards({ limit: 400, since, mode: "scheduled", concurrency: 8 });
