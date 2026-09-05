@@ -1,0 +1,274 @@
+[
+ {
+  "id": "workday:accenture.wd103--accenturecareers",
+  "ats": "Workday",
+  "slug": "accenture.wd103--AccentureCareers",
+  "companyName": "Accenture",
+  "boardUrl": "https://accenture.wd103.myworkdayjobs.com/en-US/AccentureCareers",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:accenture.wd103--avanadecareers",
+  "ats": "Workday",
+  "slug": "accenture.wd103--avanadecareers",
+  "companyName": "Avanade",
+  "boardUrl": "https://accenture.wd103.myworkdayjobs.com/en-US/avanadecareers",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:roberthalf.wd1--protivitiexperiencedcareers",
+  "ats": "Workday",
+  "slug": "roberthalf.wd1--protivitiexperiencedcareers",
+  "companyName": "Protiviti",
+  "boardUrl": "https://roberthalf.wd1.myworkdayjobs.com/en-US/protivitiexperiencedcareers",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:dxctechnology.wd1--dxcjobs",
+  "ats": "Workday",
+  "slug": "dxctechnology.wd1--dxcjobs",
+  "companyName": "DXC Technology",
+  "boardUrl": "https://dxctechnology.wd1.myworkdayjobs.com/en-US/dxcjobs",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:kyndryl.wd5--kyndrylprofessionalcareers",
+  "ats": "Workday",
+  "slug": "kyndryl.wd5--kyndrylprofessionalcareers",
+  "companyName": "Kyndryl",
+  "boardUrl": "https://kyndryl.wd5.myworkdayjobs.com/en-US/kyndrylprofessionalcareers",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:unisys.wd5--external",
+  "ats": "Workday",
+  "slug": "unisys.wd5--external",
+  "companyName": "Unisys",
+  "boardUrl": "https://unisys.wd5.myworkdayjobs.com/en-US/external",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:huron.wd1--huroncareers",
+  "ats": "Workday",
+  "slug": "huron.wd1--huroncareers",
+  "companyName": "Huron",
+  "boardUrl": "https://huron.wd1.myworkdayjobs.com/en-US/huroncareers",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:pwc.wd3--global_experienced_careers",
+  "ats": "Workday",
+  "slug": "pwc.wd3--Global_Experienced_Careers",
+  "companyName": "PwC",
+  "boardUrl": "https://pwc.wd3.myworkdayjobs.com/en-US/Global_Experienced_Careers",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:ankura.wd5--ankura",
+  "ats": "Workday",
+  "slug": "ankura.wd5--ankura",
+  "companyName": "Ankura",
+  "boardUrl": "https://ankura.wd5.myworkdayjobs.com/en-US/ankura",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:crowe.wd12--external_careers",
+  "ats": "Workday",
+  "slug": "crowe.wd12--external_careers",
+  "companyName": "Crowe",
+  "boardUrl": "https://crowe.wd12.myworkdayjobs.com/en-US/external_careers",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:bakertilly.wd5--btcareers",
+  "ats": "Workday",
+  "slug": "bakertilly.wd5--btcareers",
+  "companyName": "Baker Tilly",
+  "boardUrl": "https://bakertilly.wd5.myworkdayjobs.com/en-US/btcareers",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:cbh.wd12--cherrybekaert",
+  "ats": "Workday",
+  "slug": "cbh.wd12--cherrybekaert",
+  "companyName": "Cherry Bekaert",
+  "boardUrl": "https://cbh.wd12.myworkdayjobs.com/en-US/cherrybekaert",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:plantemoran.wd1--opportunity",
+  "ats": "Workday",
+  "slug": "plantemoran.wd1--opportunity",
+  "companyName": "Plante Moran",
+  "boardUrl": "https://plantemoran.wd1.myworkdayjobs.com/en-US/opportunity",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:cornerstone.wd501--cornerstoneresearch_careers",
+  "ats": "Workday",
+  "slug": "cornerstone.wd501--cornerstoneresearch_careers",
+  "companyName": "Cornerstone Research",
+  "boardUrl": "https://cornerstone.wd501.myworkdayjobs.com/en-US/cornerstoneresearch_careers",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:pcg.wd1--pcg_external_careers",
+  "ats": "Workday",
+  "slug": "pcg.wd1--pcg_external_careers",
+  "companyName": "Public Consulting Group",
+  "boardUrl": "https://pcg.wd1.myworkdayjobs.com/en-US/pcg_external_careers",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:collaborative.wd1--allopenings",
+  "ats": "Workday",
+  "slug": "collaborative.wd1--allopenings",
+  "companyName": "Collaborative Solutions",
+  "boardUrl": "https://collaborative.wd1.myworkdayjobs.com/en-US/allopenings",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:alteryx.wd108--alteryxcareers",
+  "ats": "Workday",
+  "slug": "alteryx.wd108--alteryxcareers",
+  "companyName": "Alteryx",
+  "boardUrl": "https://alteryx.wd108.myworkdayjobs.com/en-US/alteryxcareers",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:alation.wd503--externalsite",
+  "ats": "Workday",
+  "slug": "alation.wd503--externalsite",
+  "companyName": "Alation",
+  "boardUrl": "https://alation.wd503.myworkdayjobs.com/en-US/externalsite",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:cloudera.wd5--external_career",
+  "ats": "Workday",
+  "slug": "cloudera.wd5--external_career",
+  "companyName": "Cloudera",
+  "boardUrl": "https://cloudera.wd5.myworkdayjobs.com/en-US/external_career",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:thoughtspot.wd5--careers",
+  "ats": "Workday",
+  "slug": "thoughtspot.wd5--careers",
+  "companyName": "ThoughtSpot",
+  "boardUrl": "https://thoughtspot.wd5.myworkdayjobs.com/en-US/careers",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:o9solutions.wd5--o9solutionsexternal",
+  "ats": "Workday",
+  "slug": "o9solutions.wd5--o9solutionsexternal",
+  "companyName": "o9 Solutions",
+  "boardUrl": "https://o9solutions.wd5.myworkdayjobs.com/en-US/o9solutionsexternal",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:siegfriedgroup.wd5--siegfried_advisory_career_site",
+  "ats": "Workday",
+  "slug": "siegfriedgroup.wd5--siegfried_advisory_career_site",
+  "companyName": "Siegfried Advisory",
+  "boardUrl": "https://siegfriedgroup.wd5.myworkdayjobs.com/en-US/siegfried_advisory_career_site",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:brownadvisory.wd1--brown",
+  "ats": "Workday",
+  "slug": "brownadvisory.wd1--brown",
+  "companyName": "Brown Advisory",
+  "boardUrl": "https://brownadvisory.wd1.myworkdayjobs.com/en-US/brown",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:motorolasolutions.wd5--careers",
+  "ats": "Workday",
+  "slug": "motorolasolutions.wd5--careers",
+  "companyName": "Motorola Solutions",
+  "boardUrl": "https://motorolasolutions.wd5.myworkdayjobs.com/en-US/careers",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:digitalturbine.wd501--digital_turbine_external_careers",
+  "ats": "Workday",
+  "slug": "digitalturbine.wd501--digital_turbine_external_careers",
+  "companyName": "Digital Turbine",
+  "boardUrl": "https://digitalturbine.wd501.myworkdayjobs.com/en-US/digital_turbine_external_careers",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:onedigital.wd5--onedigital",
+  "ats": "Workday",
+  "slug": "onedigital.wd5--onedigital",
+  "companyName": "OneDigital",
+  "boardUrl": "https://onedigital.wd5.myworkdayjobs.com/en-US/onedigital",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:orionadvisor.wd1--orion_careers",
+  "ats": "Workday",
+  "slug": "orionadvisor.wd1--orion_careers",
+  "companyName": "Orion Advisor Solutions",
+  "boardUrl": "https://orionadvisor.wd1.myworkdayjobs.com/en-US/orion_careers",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:viavisolutions.wd1--careers",
+  "ats": "Workday",
+  "slug": "viavisolutions.wd1--careers",
+  "companyName": "VIAVI Solutions",
+  "boardUrl": "https://viavisolutions.wd1.myworkdayjobs.com/en-US/careers",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:interdigital.wd5--interdigital_intern",
+  "ats": "Workday",
+  "slug": "interdigital.wd5--interdigital_intern",
+  "companyName": "InterDigital",
+  "boardUrl": "https://interdigital.wd5.myworkdayjobs.com/en-US/interdigital_intern",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:web.wd1--externalcareersite",
+  "ats": "Workday",
+  "slug": "web.wd1--externalcareersite",
+  "companyName": "Newfold Digital",
+  "boardUrl": "https://web.wd1.myworkdayjobs.com/en-US/externalcareersite",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:hyphensolutions.wd5--hyphen_solutions",
+  "ats": "Workday",
+  "slug": "hyphensolutions.wd5--hyphen_solutions",
+  "companyName": "Hyphen Solutions",
+  "boardUrl": "https://hyphensolutions.wd5.myworkdayjobs.com/en-US/hyphen_solutions",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:peak6group.wd1--apexfintechsolutions",
+  "ats": "Workday",
+  "slug": "peak6group.wd1--apexfintechsolutions",
+  "companyName": "Apex Fintech Solutions",
+  "boardUrl": "https://peak6group.wd1.myworkdayjobs.com/en-US/apexfintechsolutions",
+  "origin": "consulting"
+ },
+ {
+  "id": "workday:alliedsolutions.wd501--allied_external",
+  "ats": "Workday",
+  "slug": "alliedsolutions.wd501--allied_external",
+  "companyName": "Allied Solutions",
+  "boardUrl": "https://alliedsolutions.wd501.myworkdayjobs.com/en-US/allied_external",
+  "origin": "consulting"
+ },
+ {
+  "id": "phenom:careers.bcg.com--global/en",
+  "ats": "Phenom",
+  "slug": "careers.bcg.com--global/en",
+  "companyName": "Boston Consulting Group",
+  "boardUrl": "https://careers.bcg.com/global/en/search-results",
+  "origin": "consulting"
+ }
+]
