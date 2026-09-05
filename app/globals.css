@@ -140,3 +140,15 @@ body{margin:0;background:#eef3f6;color:var(--ink);font-family:Inter,ui-sans-seri
 .jd-tags i{font-style:normal;font-size:10px;padding:1px 6px;border-radius:5px;background:#f3f6f9;color:#3d5166;border:1px solid #dfe6ec}
 .jd-tags i.yrs{background:#eef2ff;color:#3b4ea3;border-color:#cfd7f5;font-weight:700}
 .role-cell em.h1b-down{background:#fff4dd;color:#8a5a00;border-color:#f1dca6}
+
+.role-cell button.h1b{cursor:pointer;font:inherit;font-size:9.5px;font-weight:800;letter-spacing:.04em;padding:2px 7px;border-radius:5px;background:#e8f1fb;color:#1f4e8c;border:1px solid #c5d9f1;margin-left:6px;vertical-align:middle}
+.role-cell button.h1b.open{background:#1f4e8c;color:#fff}
+.role-cell button.h1b.h1b-down{background:#fff4dd;color:#8a5a00;border-color:#f1dca6}
+.h1b-detail{margin:8px 0 4px;padding:10px 12px;border:1px solid #c5d9f1;border-radius:8px;background:#f7faff;font-size:11.5px;color:var(--ink);max-width:720px}
+.h1b-detail-head{display:flex;gap:10px;align-items:baseline;margin-bottom:6px}
+.h1b-detail-head small{color:var(--muted)}
+.h1b-detail table{width:100%;border-collapse:collapse;font-size:11px}
+.h1b-detail th,.h1b-detail td{text-align:left;padding:4px 8px;border-bottom:1px solid #dfe8f2;vertical-align:top}
+.h1b-detail th{font-size:9.5px;letter-spacing:.06em;color:#64778a}
+.h1b-detail p{margin:6px 0 0}
+.h1b-detail-foot{color:var(--muted);font-size:10.5px;line-height:1.4}
