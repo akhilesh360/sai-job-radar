@@ -52,7 +52,7 @@ async function resolveWorkableAccount(company: string, website: string, title: s
 }
 
 // Every connector below is a public JSON endpoint, no credentials and no HTML scraping.
-export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling", "BambooHR", "JobScore", "Oracle", "AI Jobs", "Workable Search"];
+export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling", "BambooHR", "JobScore", "Oracle", "Gem", "AI Jobs", "Workable Search"];
 
 export function boardKeyPrefix(source: SourceBoard) {
   return `${source.ats}:${source.slug}:`.toLowerCase().replace(/[^a-z0-9:]+/g, "-");
@@ -78,11 +78,13 @@ function keep(title: string, location: string) {
   return isTargetTitle(title) && isUsLocation(location);
 }
 
-async function json<T>(url: string): Promise<T> {
+async function json<T>(url: string, body?: unknown): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12_000);
   try {
-    const response = await fetch(url, { headers: { accept: "application/json", "user-agent": "SaiJobRadar/2.0" }, signal: controller.signal });
+    const init: RequestInit = { headers: { accept: "application/json", "user-agent": "SaiJobRadar/2.0" }, signal: controller.signal };
+    if (body !== undefined) Object.assign(init, { method: "POST", body: JSON.stringify(body), headers: { ...init.headers, "content-type": "application/json" } });
+    const response = await fetch(url, init);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return await response.json() as T;
   } finally {
@@ -104,8 +106,9 @@ function atsKeyFromUrl(rawUrl: string): { id: string; ats: string; slug: string;
     if (/(^|\.)greenhouse\.io$/.test(host) && parts[1] === "jobs" && parts[2]) [ats, slug, jobId] = ["Greenhouse", parts[0], parts[2]];
     else if (host === "jobs.ashbyhq.com" && parts[1]) [ats, slug, jobId] = ["Ashby", parts[0], parts[1]];
     else if (host === "jobs.lever.co" && parts[1]) [ats, slug, jobId] = ["Lever", parts[0], parts[1]];
+    else if (host === "jobs.gem.com" && parts[1] && parts[0] !== "source") [ats, slug, jobId] = ["Gem", parts[0], parts[1]];
     else return null;
-    if (!/^(?:\d+|[0-9a-f]{8}-[0-9a-f-]{27})$/i.test(jobId)) return null;
+    if (!/^(?:\d+|[0-9a-f]{8}-[0-9a-f-]{27}|am9icG9zdD[A-Za-z0-9_-]{10,})$/i.test(jobId)) return null;
     return { id: `${ats}:${slug}`.toLowerCase(), ats, slug, jobId };
   } catch {
     return null;
@@ -352,6 +355,27 @@ export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[
       }
     }
     return out;
+  }
+
+  if (source.ats === "Gem") {
+    // Gem (gem.com ATS) hosts boards at jobs.gem.com/<slug>. The board page reads a public GraphQL endpoint; the same
+    // query works without a session. No posting date is exposed, so rows carry discovered_at as their age.
+    const query = `query JobBoardList($boardId: String!) { oatsExternalJobPostings(boardId: $boardId) { jobPostings { extId title locations { name city isoCountry isRemote } job { locationType } } } jobBoardExternal(vanityUrlPath: $boardId) { teamDisplayName } }`;
+    type GemLocation = { name?: string; city?: string; isoCountry?: string; isRemote?: boolean };
+    type GemPosting = { extId?: string; title?: string; locations?: GemLocation[]; job?: { locationType?: string } };
+    const data = await json<{ data?: { oatsExternalJobPostings?: { jobPostings?: GemPosting[] } | null; jobBoardExternal?: { teamDisplayName?: string } | null }; errors?: Array<{ message?: string }> }>(
+      "https://jobs.gem.com/api/public/graphql", { operationName: "JobBoardList", query, variables: { boardId: source.slug } },
+    );
+    if (!data.data?.jobBoardExternal) throw new Error(data.errors?.[0]?.message || "HTTP 404 (no such Gem board)");
+    const board = { ...source, companyName: str(data.data.jobBoardExternal.teamDisplayName) || source.companyName };
+    return (data.data.oatsExternalJobPostings?.jobPostings ?? []).flatMap(raw => {
+      const title = str(raw.title);
+      const places = (raw.locations ?? []).map(loc => (loc.isRemote ? "Remote" : joinParts(loc.city || loc.name, loc.isoCountry === "USA" ? "United States" : loc.isoCountry))).filter(Boolean);
+      const location = [...new Set(places)].join("; ") || (raw.job?.locationType === "REMOTE" ? "Remote" : "");
+      if (!keep(title, location)) return [];
+      const id = str(raw.extId) || title;
+      return [canonical(board, id, title, location, `https://jobs.gem.com/${source.slug}/${id}`, null)];
+    });
   }
 
   if (source.ats === "AI Jobs") {

@@ -69,7 +69,7 @@ const atsHosts: Array<{ ats: string; hosts: string[]; supported: boolean }> = [
   { ats: "CATS", hosts: ["catsone.com"], supported: false },
   // Startup job sites (direct employers; no feeds), search-only.
   { ats: "Wellfound", hosts: ["wellfound.com"], supported: false },
-  { ats: "Gem", hosts: ["jobs.gem.com"], supported: false },
+  { ats: "Gem", hosts: ["jobs.gem.com"], supported: true },
   { ats: "Dover", hosts: ["app.dover.com"], supported: false },
   { ats: "Y Combinator", hosts: ["workatastartup.com"], supported: false },
   { ats: "BambooHR", hosts: ["bamboohr.com"], supported: true },
@@ -126,7 +126,7 @@ export function parseSourceUrl(rawUrl: string, origin = "google-discovery"): Par
     // JobScore URLs are careers.jobscore.com/careers/<company>/... or /jobs/<company>/feed.json.
     if (match.ats === "JobScore") slug = ["careers", "jobs"].includes((parts[0] ?? "").toLowerCase()) ? parts[1] ?? "" : "";
     slug = decodeURIComponent(slug).trim().replace(/[?#].*$/, "");
-    const reserved = ["embed", "jobs", "job", "careers", "apply", "j", "o", "p", "www"];
+    const reserved = ["embed", "jobs", "job", "careers", "apply", "j", "o", "p", "www", "source"];
     if (!slug || reserved.includes(slug.toLowerCase()) || !/^[a-z0-9][a-z0-9._ -]{0,80}$/i.test(slug)) {
       // A readable board needs a real slug. A search-only result only needs a company name, which comes from the
       // Google title anyway — so keep it under a generic slug, unless it is the vendor's own www marketing site.
