@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, like, lt, not, or, sql, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, like, lt, lte, not, or, sql, isNotNull } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDb } from "../db";
 import { ingestionRuns, jobs, sourceBoards } from "../db/schema";
@@ -153,6 +153,8 @@ async function upsertBoardJobs(db: Db, source: SourceRow, found: CanonicalJob[],
  * Scan the active boards that have not been scanned since `since` (oldest first).
  * Call repeatedly with the same `since` until `remaining` is 0 to cover every board.
  */
+const QUIET_SLOTS_PER_RUN = 50; // per scheduled run, boards that never matched anything (their daily check)
+
 export async function scanBoards(options: { limit?: number; since?: string; concurrency?: number; mode?: "full" | "scheduled" } = {}) {
   const db = getDb();
   // 400 boards ≈ 3 subrequests each (fetch + D1), comfortably under the 1,000-subrequest ceiling per invocation.
@@ -167,7 +169,19 @@ export async function scanBoards(options: { limit?: number; since?: string; conc
     ? or(isNull(sourceBoards.lastScannedAt), and(productive, lt(sourceBoards.lastScannedAt, since)), lt(sourceBoards.lastScannedAt, new Date(new Date(since).getTime() - 24 * 60 * 60 * 1000).toISOString()))
     : or(isNull(sourceBoards.lastScannedAt), lt(sourceBoards.lastScannedAt, since));
   const filter = and(eq(sourceBoards.active, true), inArray(sourceBoards.ats, enabledAts), notExcluded, due);
-  const boards = await db.select().from(sourceBoards).where(filter).orderBy(desc(productive), asc(sourceBoards.lastScannedAt), asc(sourceBoards.id)).limit(limit);
+  let boards = await db.select().from(sourceBoards).where(filter).orderBy(desc(productive), asc(sourceBoards.lastScannedAt), asc(sourceBoards.id)).limit(limit);
+  // Productive boards always come first, and with thousands of them there are always some due, so quiet boards (never
+  // matched anything, checked daily) would never get a turn from the cron. Reserve a slice of every scheduled run for them.
+  if (options.mode === "scheduled" && limit > QUIET_SLOTS_PER_RUN) {
+    const quietInBatch = boards.filter(board => !(board.lastJobCount > 0)).length;
+    if (quietInBatch < QUIET_SLOTS_PER_RUN) {
+      const quiet = await db.select().from(sourceBoards)
+        .where(and(filter, or(isNull(sourceBoards.lastJobCount), lte(sourceBoards.lastJobCount, 0))))
+        .orderBy(asc(sourceBoards.lastScannedAt), asc(sourceBoards.id)).limit(QUIET_SLOTS_PER_RUN);
+      const chosen = new Set(quiet.map(board => board.id));
+      boards = [...boards.filter(board => !chosen.has(board.id)).slice(0, limit - quiet.length), ...quiet];
+    }
+  }
   const [run] = await db.insert(ingestionRuns).values({ status: "running" }).returning();
   let fetched = 0, inserted = 0, updated = 0, failed = 0;
   const failures: Statement[] = [];
