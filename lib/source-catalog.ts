@@ -16,7 +16,7 @@ import seedSources12 from "../data/source-seeds-12.json"; // boards behind the o
 import seedSources13 from "../data/source-seeds-13.json"; // Gem boards from the owner's saved application links (2026-09)
 import seedSources14 from "../data/source-seeds-14.json"; // openjobdata.com companies (US, readable ATS) that have posted a data/ML role (2026-09)
 import seedSources15 from "../data/source-seeds-15.json";
-import seedSources16 from "../data/source-seeds-16.json"; // consulting/advisory firms on Workday (hand-picked tenants) + BCG on Phenom (2026-09); staffing and India-based IT firms deliberately left out // the remaining openjobdata.com US companies on readable ATSs (no data-role history yet) — owner wants full coverage
+import seedSources16 from "../data/source-seeds-16.json"; // BCG on Phenom (2026-09). Workday tenants were seeded here for a day and removed: the owner does not want Workday at all // the remaining openjobdata.com US companies on readable ATSs (no data-role history yet) — owner wants full coverage
 
 const seedSources = [
   ...seedSources1,

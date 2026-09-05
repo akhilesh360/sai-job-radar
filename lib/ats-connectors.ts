@@ -52,7 +52,7 @@ async function resolveWorkableAccount(company: string, website: string, title: s
 }
 
 // Every connector below is a public JSON endpoint, no credentials and no HTML scraping.
-export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling", "BambooHR", "JobScore", "Oracle", "Gem", "Amazon", "AI Jobs", "Workable Search", "Hacker News", "Workday", "Phenom"];
+export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling", "BambooHR", "JobScore", "Oracle", "Gem", "Amazon", "AI Jobs", "Workable Search", "Hacker News", "Phenom"];
 
 export function boardKeyPrefix(source: SourceBoard) {
   return `${source.ats}:${source.slug}:`.toLowerCase().replace(/[^a-z0-9:]+/g, "-");
@@ -150,13 +150,6 @@ export async function fetchJobDetails(job: { source: string; applyUrl: string; e
       const data = await json<{ jobAd?: { sections?: Record<string, { text?: string }> } }>(`https://api.smartrecruiters.com/v1/companies/${encodeURIComponent(parts[0])}/postings/${encodeURIComponent(parts[1].split("-")[0])}`);
       const sections = data.jobAd?.sections ?? {};
       return { text: [sections.jobDescription?.text, sections.qualifications?.text, sections.additionalInformation?.text].map(str).filter(Boolean).join("\n") || null };
-    }
-    if (job.source === "Workday" && /\.myworkdayjobs\.com$/.test(url.hostname) && parts[2] === "job") {
-      // Public URL is /<lang>/<site>/job/<location>/<slug>_<req>; the JSON twin lives under /wday/cxs/<tenant>/<site>/job/...
-      const tenant = url.hostname.split(".")[0], site = parts[1];
-      const data = await json<{ jobPostingInfo?: { jobDescription?: string; startDate?: string } }>(`https://${url.hostname}/wday/cxs/${tenant}/${site}/${parts.slice(2).map(encodeURIComponent).join("/")}`);
-      const info = data.jobPostingInfo ?? {};
-      return { text: str(info.jobDescription) || null, postedAt: iso(info.startDate) };
     }
     if (job.source === "BambooHR" && /\.bamboohr\.com$/.test(url.hostname) && parts[0] === "careers" && parts[1]) {
       const data = await json<{ result?: { jobOpening?: { description?: string } } }>(`https://${url.hostname}/careers/${encodeURIComponent(parts[1])}/detail`);
@@ -319,61 +312,6 @@ export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[
       const id = str(raw.Id) || title;
       return [canonical(source, id, title, location, `${sitePath}/job/${id}`, raw.PostedDate)];
     });
-  }
-
-  if (source.ats === "Workday") {
-    // Workday's candidate site ships a public JSON twin of every page under /wday/cxs/. Slug is "<tenant>.wd<N>--<site>",
-    // e.g. "accenture.wd103--AccentureCareers". The list call takes a search text and facets; 20 rows per page is the
-    // ceiling. The United States facet id is the same in every tenant, but the facet's parameter name is not
-    // ("locationCountry" vs "Location_Country"), so it is read off the first response. Tenants whose site ignores the
-    // facet (global sites) fall back to the location text. Only hand-picked consulting tenants are seeded; Workday
-    // boards are never auto-discovered (owner's decision: Google results for Workday were junk).
-    const [host, site] = source.slug.split("--");
-    if (!host || !site) throw new Error("Workday slug must be tenant.wdN--site");
-    const tenant = host.split(".")[0], base = `https://${host}.myworkdayjobs.com/wday/cxs/${tenant}/${site}`;
-    type Posting = { title?: string; externalPath?: string; locationsText?: string; postedOn?: string; bulletFields?: string[] };
-    type Page = { total?: number; jobPostings?: Posting[]; facets?: Array<{ facetParameter?: string; values?: Array<{ id?: string; descriptor?: string }> }> };
-    const US_ID = "bc33aa3152ec42d4995f4791a106ed09";
-    const list = (appliedFacets: Record<string, string[]>, searchText: string, offset = 0) => json<Page>(`${base}/jobs`, { appliedFacets, limit: 20, offset, searchText });
-    const first = await list({}, "data engineer");
-    // Find a facet the tenant honours: the usual name first, then whatever facet lists the US id. A global site that
-    // ignores the facet returns the same total as the unfiltered call, so it is treated as unfiltered.
-    const named = (first.facets ?? []).find(facet => (facet.values ?? []).some(value => value.id === US_ID))?.facetParameter;
-    let usFacet: string | undefined;
-    for (const candidate of [...new Set(["locationCountry", named].filter((name): name is string => !!name))]) {
-      const filtered = await list({ [candidate]: [US_ID] }, "data engineer").catch(() => null);
-      if (filtered && (filtered.total ?? 0) > 0 && (filtered.total ?? 0) < (first.total ?? 0)) { usFacet = candidate; break; }
-    }
-    const appliedFacets = usFacet ? { [usFacet]: [US_ID] } : {};
-    const postedAt = (text: string) => {
-      const days = /today/i.test(text) ? 0 : /yesterday/i.test(text) ? 1 : /(\d+)\+?\s+days?/i.exec(text)?.[1];
-      if (days === undefined || /\+/.test(text)) return null; // "30+ Days Ago" = old, date unknown
-      return new Date(Date.now() - Number(days) * 86400000).toISOString();
-    };
-    const seen = new Set<string>();
-    const out: CanonicalJob[] = [];
-    for (const query of ["data engineer", "data platform", "analytics engineer", "machine learning engineer"]) {
-      for (let page = 0; page < 5; page++) {
-        const data = page === 0 && query === "data engineer" && !usFacet ? first : await list(appliedFacets, query, page * 20);
-        const postings = data.jobPostings ?? [];
-        for (const raw of postings) {
-          const path = str(raw.externalPath);
-          if (!path || seen.has(path)) continue;
-          seen.add(path);
-          const title = str(raw.title);
-          const bullets = (raw.bulletFields ?? []).map(str);
-          // Rows often carry the office only in bulletFields ("Charlotte, 1120 S Tryon St., Corp", "Location Negotiable");
-          // with the US facet honoured an unplaceable row is still a US row.
-          const bulletLocation = bullets.find(field => !/^[A-Z]{0,3}[-_]?\d{4,}$/i.test(field) && field !== title) ?? "";
-          const location = str(raw.locationsText) || (bulletLocation && isUsLocation(bulletLocation) ? bulletLocation : usFacet ? "United States" : bulletLocation);
-          if (!keep(title, location)) continue;
-          const id = path.split("_").pop() || path;
-          out.push(canonical(source, id, title, location, `https://${host}.myworkdayjobs.com/en-US/${site}${path}`, postedAt(str(raw.postedOn))));
-        }
-        if (postings.length < 20) break;
-      }
-    }
-    return out;
   }
 
   if (source.ats === "Phenom") {
