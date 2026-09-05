@@ -52,7 +52,7 @@ async function resolveWorkableAccount(company: string, website: string, title: s
 }
 
 // Every connector below is a public JSON endpoint, no credentials and no HTML scraping.
-export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling", "BambooHR", "JobScore", "Oracle", "Gem", "Amazon", "AI Jobs", "Workable Search"];
+export const enabledAts = ["Ashby", "Greenhouse", "Lever", "SmartRecruiters", "Workable", "Recruitee", "Breezy", "Pinpoint", "Rippling", "BambooHR", "JobScore", "Oracle", "Gem", "Amazon", "AI Jobs", "Workable Search", "Hacker News"];
 
 export function boardKeyPrefix(source: SourceBoard) {
   return `${source.ats}:${source.slug}:`.toLowerCase().replace(/[^a-z0-9:]+/g, "-");
@@ -410,6 +410,56 @@ export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[
           out.push({ ...canonical(board, id, title, location, `https://www.amazon.jobs${str(raw.job_path)}`, postedAt), jdText });
         }
         if (stale) break;
+      }
+    }
+    return out;
+  }
+
+  if (source.ats === "Hacker News") {
+    // The monthly "Ask HN: Who is hiring?" thread, read through Algolia's public HN API (no key). Each top-level
+    // comment is one company's post, conventionally "Company | Role(s) | Location | REMOTE/ONSITE | ...". The current
+    // and previous month's threads are read (posts stay live for weeks). The whole post is the description, so visa
+    // notes like "sponsorship OK" reach the fit scorer. Links to Greenhouse/Ashby/Lever/Gem boards queue that board.
+    type HnHit = { objectID: string; parent_id?: number; story_id?: number; title?: string; comment_text?: string | null; created_at?: string };
+    const decode = (html: string) => html.replace(/<p>/gi, "\n").replace(/<[^>]+>/g, " ").replace(/&#x2F;/g, "/").replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, "\"").replace(/&amp;/g, "&").replace(/&gt;/g, ">").replace(/&lt;/g, "<").replace(/[ \t]+/g, " ").trim();
+    const boardFromUrl = (raw: string): DiscoveredBoard | null => {
+      try {
+        const url = new URL(raw), host = url.hostname.toLowerCase(), parts = url.pathname.split("/").filter(Boolean).map(part => decodeURIComponent(part));
+        const slug = parts[0] ?? "";
+        if (!slug || ["embed", "jobs", "source", "j", "o", "p"].includes(slug.toLowerCase()) || !/^[a-z0-9][a-z0-9._ -]{0,80}$/i.test(slug)) return null;
+        let ats = "", boardUrl = "";
+        if (/(^|\.)greenhouse\.io$/.test(host) && host !== "boards-api.greenhouse.io") [ats, boardUrl] = ["Greenhouse", `https://job-boards.greenhouse.io/${slug}`];
+        else if (host === "jobs.ashbyhq.com") [ats, boardUrl] = ["Ashby", `https://jobs.ashbyhq.com/${encodeURIComponent(slug)}`];
+        else if (host === "jobs.lever.co") [ats, boardUrl] = ["Lever", `https://jobs.lever.co/${slug}`];
+        else if (host === "jobs.gem.com") [ats, boardUrl] = ["Gem", `https://jobs.gem.com/${slug}`];
+        else return null;
+        return { id: `${ats}:${slug}`.toLowerCase(), ats, slug, companyName: slug, boardUrl, origin: "hn-who-is-hiring" };
+      } catch { return null; }
+    };
+    const stories = await json<{ hits?: HnHit[] }>("https://hn.algolia.com/api/v1/search_by_date?tags=story,author_whoishiring&hitsPerPage=12");
+    const threads = (stories.hits ?? []).filter(hit => /who is hiring/i.test(str(hit.title))).slice(0, 2);
+    const out: CanonicalJob[] = [];
+    for (const thread of threads) {
+      for (let page = 0; page < 3; page++) {
+        const data = await json<{ hits?: HnHit[]; nbPages?: number }>(`https://hn.algolia.com/api/v1/search_by_date?tags=comment,story_${thread.objectID}&hitsPerPage=1000&page=${page}`);
+        for (const hit of data.hits ?? []) {
+          if (String(hit.parent_id) !== String(thread.objectID) || !hit.comment_text) continue;
+          const text = decode(hit.comment_text);
+          const header = text.split("\n")[0] ?? "";
+          const segments = header.split("|").map(part => part.trim()).filter(Boolean);
+          if (segments.length < 2) continue;
+          const company = segments[0].replace(/https?:\/\/\S+/g, "").replace(/\s*\((?:YC|S|W)\s*[A-Z]?\d{2}\)/i, "").trim().slice(0, 80);
+          const title = segments.slice(1).find(part => isTargetTitle(part)) ?? "";
+          if (!company || !title) continue;
+          const location = segments.slice(1).find(part => part !== title && /\b(?:remote|onsite|on-?site|hybrid|us|usa|united states|new york|nyc|san francisco|sf|bay area|boston|seattle|austin|chicago|denver|los angeles|la)\b|, [A-Z]{2}\b/i.test(part)) ?? (/\bremote\b/i.test(header) ? "Remote" : "");
+          if (!keep(title, location)) continue;
+          const links = [...text.matchAll(/https?:\/\/[^\s)>\]"]+/g)].map(match => match[0].replace(/[.,;:]+$/, ""));
+          for (const link of links) { const board = boardFromUrl(link); if (board) discoveredBoards.set(board.id, { ...board, companyName: company }); }
+          const hnUrl = `https://news.ycombinator.com/item?id=${hit.objectID}`;
+          const applyUrl = links.find(link => !/news\.ycombinator\.com/i.test(link)) ?? hnUrl;
+          out.push({ ...canonical({ ...source, companyName: company }, hit.objectID, title, location, applyUrl, hit.created_at), sourceUrl: hnUrl, jdText: text });
+        }
+        if (page + 1 >= (data.nbPages ?? 1)) break;
       }
     }
     return out;
