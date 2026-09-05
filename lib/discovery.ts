@@ -191,6 +191,24 @@ function guessLocation(text: string) {
 export function discoveryConfigured() { return Boolean(bindings().SERPER_API_KEY); }
 export function discoveryIntervalHours() { return Math.max(1, Number(bindings().DISCOVERY_INTERVAL_HOURS ?? 12) || 12); }
 
+/**
+ * Automatic Google runs happen at fixed local times on weekdays (owner's choice, 2026-09-05): 6:30, 11:30, 14:30 and
+ * 19:30 Central, when companies actually post. Four weekday runs ≈ 88 runs a month ≈ 34k Serper credits against the
+ * owner's ~48k monthly budget. The cron ticks every 5 minutes, so a slot is a 10-minute window starting at the time.
+ */
+export const discoverySchedule = { timeZone: "America/Chicago", weekdaysOnly: true, times: ["06:30", "11:30", "14:30", "19:30"] };
+
+export function discoveryDueAt(now: Date, lastDiscoveryAt: string | null | undefined) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: discoverySchedule.timeZone, weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(now);
+  const part = (type: string) => parts.find(item => item.type === type)?.value ?? "";
+  if (discoverySchedule.weekdaysOnly && ["Sat", "Sun"].includes(part("weekday"))) return false;
+  const minutes = (Number(part("hour")) % 24) * 60 + Number(part("minute"));
+  const inSlot = discoverySchedule.times.some(time => { const [h, m] = time.split(":").map(Number); const delta = minutes - (h * 60 + m); return delta >= 0 && delta < 10; });
+  if (!inSlot) return false;
+  // One run per slot: skip if the last run was under an hour ago.
+  return !lastDiscoveryAt || now.getTime() - new Date(lastDiscoveryAt).getTime() > 60 * 60 * 1000;
+}
+
 export async function discoverNewBoards() {
   const key = bindings().SERPER_API_KEY;
   if (!key) return { configured: false as const, queries: 0, results: 0, newSources: 0, bumpedBoards: 0, unverifiedJobs: 0, failed: 0 };

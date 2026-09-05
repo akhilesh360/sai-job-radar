@@ -1,31 +1,30 @@
 import { and, eq, gt, inArray, isNotNull, like, lt, sql } from "drizzle-orm";
 import { getDb } from "../db";
 import { jobs } from "../db/schema";
-import { discoverNewBoards, discoveryConfigured, discoveryIntervalHours } from "./discovery";
+import { discoverNewBoards, discoveryConfigured, discoveryDueAt } from "./discovery";
 import { ensureDefaultSources, retryDeadLetter, scanBoards, validatePendingSources } from "./pipeline";
 import { getState, setState } from "./state";
 import { scorePendingJobs } from "./fit";
 
 /**
  * What the Worker cron runs every 5 minutes (Workers Paid plan — a run may use up to 30 s of CPU):
- *   1. Google discovery — every DISCOVERY_INTERVAL_HOURS (default 12) when AUTO_DISCOVERY is on. Turned on 2026-09-05:
- *      a run costs ~384 Serper credits and the owner budgets 48k credits per month, so twice a day (~23k/month) leaves
- *      room for the dashboard's "Google search" button.
+ *   1. Google discovery — weekdays at 6:30, 11:30, 14:30 and 19:30 Central (lib/discovery.ts discoverySchedule).
+ *      A run costs ~384 Serper credits; ~88 runs a month ≈ 34k against the owner's ~48k monthly budget, leaving room
+ *      for the dashboard's "Google search" button.
  *   2. Validate pending boards (newly discovered ones first).
  *   2b. Re-probe up to 40 dead-letter boards whose weekly retry is due (lib/dead-letter.ts); ones that answer
  *       rejoin the scan rotation, 404s are removed after one failed re-check, other failures after eight weeks.
  *   3. Scan boards that are due: bumped/new boards first, then productive boards not read in the last
  *      14 minutes (400 per run — 1,200 boards per 15 minutes), then quiet boards older than a day.
  */
-/** Let the cron run Google discovery every DISCOVERY_INTERVAL_HOURS (default 12) on its own. */
+/** Let the cron run Google discovery on its own at the weekday slots in lib/discovery.ts (discoverySchedule). */
 const AUTO_DISCOVERY = true;
 
 export async function runScheduledMaintenance() {
   const db = getDb();
   await ensureDefaultSources(db);
   const lastDiscovery = await getState(db, "last_discovery_at");
-  const intervalMs = discoveryIntervalHours() * 60 * 60 * 1000;
-  const discoveryDue = AUTO_DISCOVERY && discoveryConfigured() && (!lastDiscovery || Date.now() - new Date(lastDiscovery).getTime() > intervalMs - 5 * 60 * 1000);
+  const discoveryDue = AUTO_DISCOVERY && discoveryConfigured() && discoveryDueAt(new Date(), lastDiscovery);
   const discovery = discoveryDue ? await discoverNewBoards() : null;
   const validation = await validatePendingSources(60);
   // A dead-letter problem must never stop the scan.

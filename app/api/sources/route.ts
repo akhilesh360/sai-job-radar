@@ -3,7 +3,7 @@ import { getDb } from "../../../db";
 import { sourceBoards } from "../../../db/schema";
 import { ensureDefaultSources } from "../../../lib/pipeline";
 import { getState } from "../../../lib/state";
-import { creditsPerDiscoveryRun, discoveryConfigured, discoveryIntervalHours } from "../../../lib/discovery";
+import { creditsPerDiscoveryRun, discoveryConfigured, discoveryIntervalHours, discoverySchedule } from "../../../lib/discovery";
 import { getCatalogOffset, importSourceSeedBatch, sourceSeedCount } from "../../../lib/source-catalog";
 import { deadLetterSummary } from "../../../lib/pipeline";
 
@@ -27,7 +27,7 @@ export async function GET() {
   const discovered = await db.select({ count: sql<number>`count(*)` }).from(sourceBoards).where(eq(sourceBoards.origin, "google-discovery"));
   const deadLetter = await deadLetterSummary();
   const oldest = await db.select({ at: sql<string | null>`min(${sourceBoards.lastScannedAt})` }).from(sourceBoards).where(eq(sourceBoards.active, true));
-  return Response.json({ total, active, pending, invalid, errored, byAts, seedCatalogSize: sourceSeedCount, catalogOffset, catalogComplete: catalogOffset >= sourceSeedCount, lastFullScanAt, lastScheduledRunAt, oldestScanAt: oldest[0]?.at ?? null, discoveryConfigured: discoveryConfigured(), discoveryIntervalHours: discoveryIntervalHours(), creditsPerDiscoveryRun, lastDiscoveryAt, lastDiscoveryError: lastDiscoveryError || null, discoveredBoards: Number(discovered[0]?.count ?? 0), serperCreditsUsed: Number(serperCreditsUsed ?? 0), deadLetter: { waiting: deadLetter.waiting, dead: deadLetter.dead, dueNow: deadLetter.dueNow, nextRetryAt: deadLetter.nextRetryAt, byKind: deadLetter.byKind, lastRetryAt: deadLetter.lastRetryAt, recoveredTotal: deadLetter.recoveredTotal, removedTotal: deadLetter.removedTotal } });
+  return Response.json({ total, active, pending, invalid, errored, byAts, seedCatalogSize: sourceSeedCount, catalogOffset, catalogComplete: catalogOffset >= sourceSeedCount, lastFullScanAt, lastScheduledRunAt, oldestScanAt: oldest[0]?.at ?? null, discoveryConfigured: discoveryConfigured(), discoveryIntervalHours: discoveryIntervalHours(), discoverySchedule, creditsPerDiscoveryRun, lastDiscoveryAt, lastDiscoveryError: lastDiscoveryError || null, discoveredBoards: Number(discovered[0]?.count ?? 0), serperCreditsUsed: Number(serperCreditsUsed ?? 0), deadLetter: { waiting: deadLetter.waiting, dead: deadLetter.dead, dueNow: deadLetter.dueNow, nextRetryAt: deadLetter.nextRetryAt, byKind: deadLetter.byKind, lastRetryAt: deadLetter.lastRetryAt, recoveredTotal: deadLetter.recoveredTotal, removedTotal: deadLetter.removedTotal } });
 }
 
 /** Stage the next batch of catalog boards as pending sources. */
