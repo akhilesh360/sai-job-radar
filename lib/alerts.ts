@@ -1,7 +1,8 @@
 import { and, desc, eq, gt, gte, inArray } from "drizzle-orm";
 import { env } from "cloudflare:workers";
 import { getDb } from "../db";
-import { alertDeliveries, jobs } from "../db/schema";
+import { alertDeliveries, h1bSponsors, jobs } from "../db/schema";
+import { employerKey, matchSponsor, normalizeEmployer, type SponsorRow } from "./h1b";
 import { visibleJobs } from "./visibility";
 
 /**
@@ -10,7 +11,7 @@ import { visibleJobs } from "./visibility";
  * calls this right after scoring; a job is sent once, when it first scores at or above MIN_ALERT_SCORE.
  */
 export const MIN_ALERT_SCORE = 75;
-const MAX_PER_RUN = 10;
+const MAX_PER_RUN = 25; // one digest message per pass
 
 export async function sendFitAlerts() {
   const bindings = env as unknown as { SLACK_WEBHOOK_URL?: string; NTFY_TOPIC?: string };
@@ -27,31 +28,43 @@ export async function sendFitAlerts() {
   const already = new Set((await db.select({ jobId: alertDeliveries.jobId }).from(alertDeliveries)
     .where(and(eq(alertDeliveries.channel, channel), inArray(alertDeliveries.deliveryStatus, ["sent", "backfill"]), inArray(alertDeliveries.jobId, candidates.map(job => job.id))))).map(row => row.jobId));
   let sent = 0, failed = 0, lastError = "";
-  for (const job of candidates.filter(job => !already.has(job.id)).slice(0, MAX_PER_RUN)) {
-    const reason = (job.fitReason ?? "").split(/\n|;/)[0].trim();
-    const body = [`${job.company} · ${job.location}${job.salary ? ` · ${job.salary}` : ""}`, reason].filter(Boolean).join("\n");
-    let ok = false;
-    try {
-      const response = webhook
-        ? await fetch(webhook, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              text: `${job.fitScore} · ${job.title} — ${job.company}`,
-              blocks: [
-                { type: "section", text: { type: "mrkdwn", text: `*${job.fitScore}* · <${job.applyUrl}|${job.title.replace(/[<>|]/g, " ")}>\n${job.company} · ${job.location}${job.salary ? ` · ${job.salary}` : ""}${reason ? `\n_${reason.replace(/[<>|]/g, " ")}_` : ""}` } },
-              ],
-            }),
-          })
-        : await fetch("https://ntfy.sh", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ topic, title: `${job.fitScore} · ${job.title}`.slice(0, 200), message: body, click: job.applyUrl, tags: (job.fitScore ?? 0) >= 90 ? ["star", "briefcase"] : ["briefcase"], priority: (job.fitScore ?? 0) >= 90 ? 4 : 3 }),
-          });
-      ok = response.ok;
-      if (!ok) lastError = `HTTP ${response.status} ${(await response.text().catch(() => "")).slice(0, 200)}`;
-    } catch (error) { ok = false; lastError = error instanceof Error ? error.message : String(error); }
-    if (ok) sent++; else failed++;
+  const batch = candidates.filter(job => !already.has(job.id)).slice(0, MAX_PER_RUN);
+  if (!batch.length) return { configured: true as const, channel, sent, failed };
+  // H-1B sponsor lookup, the same way the fit scorer does it, so sponsors can lead the list.
+  const keys = [...new Set(batch.map(job => employerKey(normalizeEmployer(job.company))).filter(Boolean))];
+  const byKey = new Map<string, SponsorRow[]>();
+  for (let index = 0; index < keys.length; index += 90) {
+    for (const row of await db.select().from(h1bSponsors).where(inArray(h1bSponsors.key1, keys.slice(index, index + 90)))) byKey.set(row.key1, [...(byKey.get(row.key1) ?? []), row]);
+  }
+  const rows = batch.map(job => ({ job, sponsor: matchSponsor(job.company, byKey.get(employerKey(normalizeEmployer(job.company))) ?? []) !== null }))
+    .sort((a, b) => Number(b.sponsor) - Number(a.sponsor) || (b.job.fitScore ?? 0) - (a.job.fitScore ?? 0));
+  const clean = (value: string) => value.replace(/[<>|]/g, " ").replace(/\s+/g, " ").trim();
+  const lines = rows.map(({ job, sponsor }) => `*${job.fitScore}* · ${sponsor ? "✅ H-1B" : "—"} · <${job.applyUrl}|${clean(job.title).slice(0, 90)}> — ${clean(job.company)} · ${clean(job.location)}${job.salary ? ` · ${job.salary}` : ""}`);
+  let ok = false;
+  try {
+    const response = webhook
+      ? await fetch(webhook, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            text: `${rows.length} new match${rows.length === 1 ? "" : "es"} scoring ${MIN_ALERT_SCORE}+`,
+            blocks: [
+              { type: "header", text: { type: "plain_text", text: `${rows.length} new match${rows.length === 1 ? "" : "es"} · ${MIN_ALERT_SCORE}+ · sponsors first` } },
+              ...lines.reduce<string[][]>((groups, line) => { const last = groups[groups.length - 1]; if (last && last.join("\n").length + line.length < 2800) last.push(line); else groups.push([line]); return groups; }, [])
+                .map(group => ({ type: "section", text: { type: "mrkdwn", text: group.join("\n") } })),
+            ],
+          }),
+        })
+      : await fetch("https://ntfy.sh", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ topic, title: `${rows.length} new matches ${MIN_ALERT_SCORE}+`, message: rows.map(({ job }) => `${job.fitScore} · ${job.title} — ${job.company}`).join("\n").slice(0, 4000) }),
+        });
+    ok = response.ok;
+    if (!ok) lastError = `HTTP ${response.status} ${(await response.text().catch(() => "")).slice(0, 200)}`;
+  } catch (error) { ok = false; lastError = error instanceof Error ? error.message : String(error); }
+  if (ok) sent = rows.length; else failed = rows.length;
+  for (const { job } of rows) {
     await db.delete(alertDeliveries).where(and(eq(alertDeliveries.jobId, job.id), eq(alertDeliveries.channel, channel)));
     await db.insert(alertDeliveries).values({ jobId: job.id, channel, deliveryStatus: ok ? "sent" : "failed" }).onConflictDoNothing();
   }

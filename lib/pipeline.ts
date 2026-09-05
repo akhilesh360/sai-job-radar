@@ -187,8 +187,8 @@ export async function scanBoards(options: { limit?: number; since?: string; conc
     }
   });
   if (failures.length) await runBatch(db, failures);
-  const remainingRows = await db.select({ count: sql<number>`count(*)` }).from(sourceBoards).where(filter);
-  const remaining = Number(remainingRows[0]?.count ?? 0);
+  // The count is informational; a D1 hiccup here must not fail a scan that already saved its jobs (-1 = unknown).
+  const remaining = await db.select({ count: sql<number>`count(*)` }).from(sourceBoards).where(filter).then(rows => Number(rows[0]?.count ?? 0)).catch(() => -1);
   const status = boards.length && failed === boards.length ? "failed" : failed ? "partial" : "succeeded";
   await db.update(ingestionRuns).set({ finishedAt: now(), status, fetched, inserted, updated, failed }).where(eq(ingestionRuns.id, run.id));
   if (remaining === 0) await setState(db, "last_full_scan_at", now());

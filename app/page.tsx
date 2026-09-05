@@ -209,7 +209,7 @@ export default function Home() {
       while (remainingPending > 0 && !stopRequested.current) {
         setNotice(`Step 1/2 · Checking boards… ${validated.toLocaleString()} checked, ${activeFound.toLocaleString()} live${Number.isFinite(remainingPending) ? `, ${remainingPending.toLocaleString()} left` : ""}`);
         const result = await postSlice<{ checked: number; active: number; remaining: number }>("/api/internal/validate-sources", validateSize);
-        validated += result.checked; activeFound += result.active; remainingPending = result.remaining;
+        validated += result.checked; activeFound += result.active; remainingPending = result.remaining < 0 ? Infinity : result.remaining;
         if (result.checked === 0) break;
       }
       stats = await (await fetch("/api/sources", { cache: "no-store" })).json() as SourceStats;
@@ -224,7 +224,7 @@ export default function Home() {
         setNotice(`Step 2/2 · Reading job feeds… ${boardsScanned.toLocaleString()} / ${stats.active.toLocaleString()} boards, ${totalNew} new jobs so far`);
         const result = await postSlice<{ scanned: number; inserted: number; updated: number; remaining: number; since: string }>("/api/internal/ingest", scanSize, since ? { since } : {});
         since = result.since;
-        boardsScanned += result.scanned; totalNew += result.inserted; totalRefreshed += result.updated; remaining = result.remaining;
+        boardsScanned += result.scanned; totalNew += result.inserted; totalRefreshed += result.updated; remaining = result.remaining < 0 ? Infinity : result.remaining;
         if (result.scanned === 0) break;
         if (boardsScanned % 100 < 25) await loadJobs();
       }
