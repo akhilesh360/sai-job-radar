@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const jobs = sqliteTable("jobs", {
   id: text("id").primaryKey(),
@@ -151,3 +151,17 @@ export const h1bSponsors = sqliteTable("h1b_sponsors", {
   /** Latest fiscal year with a certified H-1B LCA (DOL disclosure data), when known. */
   lcaLatestFy: integer("lca_latest_fy"),
 }, (table) => [index("h1b_sponsors_key1_idx").on(table.key1)]);
+
+/** Certified H-1B Labor Condition Applications per employer per fiscal year (DOL disclosure data, scripts/load-lca-stats.mjs). */
+export const h1bLcaStats = sqliteTable("h1b_lca_stats", {
+  nameNorm: text("name_norm").notNull(),
+  fiscalYear: integer("fiscal_year").notNull(),
+  lcas: integer("lcas").notNull(),
+  positions: integer("positions").notNull(),
+  dataLcas: integer("data_lcas").notNull(),
+  dataWageP25: integer("data_wage_p25"),
+  dataWageMedian: integer("data_wage_median"),
+  dataWageP75: integer("data_wage_p75"),
+  topStates: text("top_states"),
+  topDataTitles: text("top_data_titles"),
+}, (table) => [primaryKey({ columns: [table.nameNorm, table.fiscalYear] })]);

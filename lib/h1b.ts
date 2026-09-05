@@ -22,7 +22,8 @@ export function employerKey(normalized: string): string {
 const filler = new Set(["inc", "llc", "corp", "co", "company", "group", "holdings", "holding", "technologies", "technology", "tech", "labs", "lab", "software", "systems", "solutions", "services", "service", "america", "americas", "north", "us", "usa", "u", "s", "international", "global", "opco", "operations", "capital", "management", "business", "com", "io", "health", "healthcare", "financial", "finance", "partners", "ventures", "enterprises", "industries", "digital", "data", "consulting", "networks", "network", "payments", "bank", "national", "association", "n", "a", "trust", "insurance", "media", "labs", "research", "energy", "motor", "motors", "foods", "stores", "worldwide", "platforms", "products", "web", "cloud", "online", "mobile"]);
 
 export type SponsorRow = { nameNorm: string; name: string; approvals: number; fiscalYear: number; state: string | null; lcaLatestFy?: number | null };
-export type SponsorMatch = { name: string; approvals: number; fiscalYear: number; exact: boolean; lcaLatestFy: number | null };
+export type LcaYear = { fiscalYear: number; lcas: number; positions: number; dataLcas: number; dataWageP25: number | null; dataWageMedian: number | null; dataWageP75: number | null; topDataTitles: string | null };
+export type SponsorMatch = { name: string; approvals: number; fiscalYear: number; exact: boolean; lcaLatestFy: number | null; /** filled by the API from h1b_lca_stats for the matched legal entities */ lca?: LcaYear[]; nameNorms?: string[] };
 
 /**
  * Pick the sponsor that a job's company name refers to, from the rows sharing its first token.
@@ -55,5 +56,19 @@ export function matchSponsor(company: string, candidates: SponsorRow[]): Sponsor
   }
   const best = hits.reduce((a, b) => (b.approvals > a.approvals ? b : a));
   const lcaYears = hits.map(c => c.lcaLatestFy ?? 0).filter(Boolean);
-  return { name: best.name, approvals: hits.reduce((sum, c) => sum + c.approvals, 0), fiscalYear: Math.max(...hits.map(c => c.fiscalYear)), exact: hits.some(c => c.nameNorm === norm), lcaLatestFy: lcaYears.length ? Math.max(...lcaYears) : null };
+  return { name: best.name, approvals: hits.reduce((sum, c) => sum + c.approvals, 0), fiscalYear: Math.max(...hits.map(c => c.fiscalYear)), exact: hits.some(c => c.nameNorm === norm), lcaLatestFy: lcaYears.length ? Math.max(...lcaYears) : null, nameNorms: hits.map(c => c.nameNorm) };
+}
+
+/** Sum per-year LCA rows of every legal entity behind a match, newest year first. */
+export function attachLcaStats(match: SponsorMatch, rows: Array<LcaYear & { nameNorm: string }>): SponsorMatch {
+  const mine = rows.filter(r => match.nameNorms?.includes(r.nameNorm));
+  const byYear = new Map<number, LcaYear>();
+  for (const r of mine) {
+    const y = byYear.get(r.fiscalYear) ?? { fiscalYear: r.fiscalYear, lcas: 0, positions: 0, dataLcas: 0, dataWageP25: null, dataWageMedian: null, dataWageP75: null, topDataTitles: null };
+    // wages: keep the entity with the most data-role LCAs as representative
+    if (r.dataLcas > (y.dataLcas || 0) || y.dataWageMedian === null) { y.dataWageP25 = r.dataWageP25; y.dataWageMedian = r.dataWageMedian; y.dataWageP75 = r.dataWageP75; y.topDataTitles = r.topDataTitles; }
+    y.lcas += r.lcas; y.positions += r.positions; y.dataLcas += r.dataLcas; byYear.set(r.fiscalYear, y);
+  }
+  const lca = [...byYear.values()].sort((a, b) => b.fiscalYear - a.fiscalYear);
+  return { ...match, lca, lcaLatestFy: lca[0]?.fiscalYear ?? match.lcaLatestFy };
 }

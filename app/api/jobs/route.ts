@@ -1,7 +1,7 @@
 import { desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { h1bSponsors, jobs } from "../../../db/schema";
-import { employerKey, matchSponsor, normalizeEmployer, type SponsorRow } from "../../../lib/h1b";
+import { h1bLcaStats, h1bSponsors, jobs } from "../../../db/schema";
+import { attachLcaStats, employerKey, matchSponsor, normalizeEmployer, type SponsorRow } from "../../../lib/h1b";
 import { visibleJobs } from "../../../lib/visibility";
 
 const jobStatuses = ["New", "Saved", "Applied", "Interview", "Rejected", "Archived", "Closed"] as const;
@@ -19,7 +19,17 @@ export async function GET() {
       const found = await db.select().from(h1bSponsors).where(inArray(h1bSponsors.key1, keys.slice(index, index + 90)));
       for (const row of found) byKey.set(row.key1, [...(byKey.get(row.key1) ?? []), row]);
     }
-    const withSponsor = rows.map(row => ({ ...row, h1b: matchSponsor(row.company, byKey.get(employerKey(normalizeEmployer(row.company))) ?? []) }));
+    const matched = rows.map(row => ({ ...row, h1b: matchSponsor(row.company, byKey.get(employerKey(normalizeEmployer(row.company))) ?? []) }));
+    // Per-year LCA stats (DOL) for every legal entity behind the matches — the last three fiscal years.
+    const norms = [...new Set(matched.flatMap(row => row.h1b?.nameNorms ?? []))];
+    const stats: Array<typeof h1bLcaStats.$inferSelect> = [];
+    for (let index = 0; index < norms.length; index += 90) stats.push(...await db.select().from(h1bLcaStats).where(inArray(h1bLcaStats.nameNorm, norms.slice(index, index + 90))));
+    const withSponsor = matched.map(row => {
+      if (!row.h1b) return row;
+      const { nameNorms, ...h1b } = attachLcaStats(row.h1b, stats);
+      void nameNorms;
+      return { ...row, h1b: { ...h1b, lca: (h1b.lca ?? []).slice(0, 3) } };
+    });
     return Response.json({ jobs: withSponsor });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unable to load jobs" }, { status: 500 });

@@ -139,3 +139,4 @@ body{margin:0;background:#eef3f6;color:var(--ink);font-family:Inter,ui-sans-seri
 .jd-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
 .jd-tags i{font-style:normal;font-size:10px;padding:1px 6px;border-radius:5px;background:#f3f6f9;color:#3d5166;border:1px solid #dfe6ec}
 .jd-tags i.yrs{background:#eef2ff;color:#3b4ea3;border-color:#cfd7f5;font-weight:700}
+.role-cell em.h1b-down{background:#fff4dd;color:#8a5a00;border-color:#f1dca6}
