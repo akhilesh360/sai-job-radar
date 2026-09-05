@@ -21,7 +21,7 @@ import { getState, setState } from "./state";
  * Workday rows are skipped by the owner's standing decision (flip INCLUDE_WORKDAY to change that).
  */
 const INCLUDE_WORKDAY = false;
-const SYNC_EVERY_HOURS = 2; // they publish once a day at a wandering hour (2–9 AM Central seen); unchanged files cost one small fetch
+const SYNC_EVERY_HOURS = 1; // they publish once a day at a wandering hour (2–9 AM Central seen); unchanged files cost one small fetch
 const FRESH_DAYS = 3;
 const BUCKET = "https://huggingface.co/buckets/Invicto69/Jobs-Dataset-bucket/resolve/data/minimal/changes";
 
