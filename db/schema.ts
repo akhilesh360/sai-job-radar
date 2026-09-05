@@ -170,3 +170,13 @@ export const h1bLcaStats = sqliteTable("h1b_lca_stats", {
   topStates: text("top_states"),
   topDataTitles: text("top_data_titles"),
 }, (table) => [primaryKey({ columns: [table.nameNorm, table.fiscalYear] })]);
+
+/** openjobdata.com company registry (company_id → name/ATS/slug), loaded by scripts/openjobdata-companies.py; joined by the daily delta sync. */
+export const ojdCompanies = sqliteTable("ojd_companies", {
+  id: integer("id").primaryKey(),
+  name: text("name").notNull(),
+  ats: text("ats").notNull(),
+  slug: text("slug").notNull(),
+  careerUrl: text("career_url"),
+  country: text("country"),
+}, (table) => [index("ojd_companies_ats_idx").on(table.ats)]);

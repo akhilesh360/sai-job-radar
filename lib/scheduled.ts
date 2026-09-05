@@ -3,6 +3,7 @@ import { getDb } from "../db";
 import { jobs } from "../db/schema";
 import { discoverNewBoards, discoveryConfigured, discoveryDueAt } from "./discovery";
 import { sendFitAlerts } from "./alerts";
+import { syncOpenJobData } from "./openjobdata";
 import { ensureDefaultSources, retryDeadLetter, scanBoards, validatePendingSources } from "./pipeline";
 import { getState, setState } from "./state";
 import { scorePendingJobs } from "./fit";
@@ -33,6 +34,8 @@ export async function runScheduledMaintenance() {
   const since = new Date(Date.now() - 14 * 60 * 1000).toISOString();
   // 400 boards ≈ 4 s CPU / 25 s wall on Workers Paid; measured under the 1,000-subrequest ceiling.
   const scan = await scanBoards({ limit: 400, since, mode: "scheduled", concurrency: 8 });
+  // openjobdata.com daily delta (postings on ATSs we cannot read); every 6 hours, never allowed to fail the run.
+  const openjobdata = await syncOpenJobData().catch(error => ({ skipped: "error" as const, error: error instanceof Error ? error.message : String(error) }));
   // A job scored before its description was read is re-scored once the description is in (the board-payload backfill
   // lands a few per scan). Then fit-score whatever is new; a scoring problem must never fail the scan.
   await db.update(jobs).set({ fitScore: null, fitReason: null, fitScoredAt: null }).where(and(inArray(jobs.status, ["New", "Saved"]), isNotNull(jobs.fitScoredAt), isNotNull(jobs.jdFetchedAt), gt(jobs.jdFetchedAt, sql`${jobs.fitScoredAt}`)));
@@ -45,5 +48,5 @@ export async function runScheduledMaintenance() {
   // seen for three days is closed (boards are re-read at least daily, so live jobs never get here).
   await db.update(jobs).set({ status: "Closed" }).where(and(inArray(jobs.status, ["New", "Saved"]), lt(jobs.lastSeenAt, new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())));
   await setState(db, "last_scheduled_run_at", new Date().toISOString());
-  return { discovery, validation, deadLetter, scan, fit, alerts };
+  return { discovery, validation, deadLetter, scan, fit, alerts, openjobdata };
 }

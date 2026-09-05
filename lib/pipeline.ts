@@ -80,6 +80,40 @@ export async function validatePendingSources(limit = 30, concurrency = 6) {
   return { checked: pending.length, active, invalid, remaining: Number(remainingRows[0]?.count ?? 0) };
 }
 
+/** Insert-or-update statements for job rows (shared by board scans and aggregator syncs). 4 rows per statement keeps D1 under 100 bound variables. */
+export function jobUpsertStatements(db: Db, rows: Array<Omit<CanonicalJob, "jdText"> & { jdSkills?: string | null; jdYears?: number | null; jdFlags?: string | null; jdFetchedAt?: string | null }>): Statement[] {
+  const statements: Statement[] = [];
+  for (let index = 0; index < rows.length; index += 4) {
+    const chunk = rows.slice(index, index + 4);
+    statements.push(db.insert(jobs).values(chunk).$dynamic().onConflictDoUpdate({
+      target: jobs.canonicalKey,
+      set: {
+        title: sql`excluded.title`, company: sql`excluded.company`, location: sql`excluded.location`, workplace: sql`excluded.workplace`,
+        sourceUrl: sql`excluded.source_url`, applyUrl: sql`excluded.apply_url`, lastSeenAt: sql`excluded.last_seen_at`,
+        postedAt: sql`CASE WHEN excluded.source = 'Greenhouse' AND ${jobs.postedAt} IS NOT NULL THEN MIN(${jobs.postedAt}, excluded.posted_at) ELSE excluded.posted_at END`,
+        salary: sql`COALESCE(excluded.salary, ${jobs.salary})`,
+        jdSkills: sql`COALESCE(excluded.jd_skills, ${jobs.jdSkills})`, jdYears: sql`COALESCE(excluded.jd_years, ${jobs.jdYears})`, jdFlags: sql`COALESCE(excluded.jd_flags, ${jobs.jdFlags})`, jdFetchedAt: sql`COALESCE(excluded.jd_fetched_at, ${jobs.jdFetchedAt})`,
+        status: sql`CASE WHEN ${jobs.status} = 'Closed' THEN 'New' ELSE ${jobs.status} END`,
+      },
+    }));
+  }
+  return statements;
+}
+
+/** Upsert aggregator rows without closing anything (the aggregator only sees changes, never a full listing). */
+export async function upsertAggregatorJobs(found: CanonicalJob[]) {
+  const db = getDb();
+  if (!found.length) return { inserted: 0, updated: 0 };
+  const keys = found.map(job => job.canonicalKey);
+  const existing = new Set<string>();
+  for (let index = 0; index < keys.length; index += 90) {
+    for (const row of await db.select({ canonicalKey: jobs.canonicalKey }).from(jobs).where(inArray(jobs.canonicalKey, keys.slice(index, index + 90)))) existing.add(row.canonicalKey);
+  }
+  await runBatch(db, jobUpsertStatements(db, found.map(({ jdText: _jd, ...job }) => job)));
+  const inserted = found.filter(job => !existing.has(job.canonicalKey)).length;
+  return { inserted, updated: found.length - inserted };
+}
+
 async function upsertBoardJobs(db: Db, source: SourceRow, found: CanonicalJob[], scanStartedAt: string) {
   const at = now();
   const prefix = boardKeyPrefix(source);
@@ -102,25 +136,7 @@ async function upsertBoardJobs(db: Db, source: SourceRow, found: CanonicalJob[],
     const jd = summarizeJd(jdText.slice(0, 8000));
     return { ...job, jdSkills: jd.skills.join(", ") || null, jdYears: jd.years, jdFlags: jd.flags.join(",") || null, jdFetchedAt: extractedAt };
   });
-  const statements: Statement[] = [];
-  // D1 allows 100 bound variables per statement; a job row now carries ~20 columns, so insert 4 rows at a time.
-  for (let index = 0; index < rows.length; index += 4) {
-    const chunk = rows.slice(index, index + 4);
-    statements.push(db.insert(jobs).values(chunk).$dynamic().onConflictDoUpdate({
-      target: jobs.canonicalKey,
-      set: {
-        title: sql`excluded.title`, company: sql`excluded.company`, location: sql`excluded.location`, workplace: sql`excluded.workplace`,
-        sourceUrl: sql`excluded.source_url`, applyUrl: sql`excluded.apply_url`, lastSeenAt: sql`excluded.last_seen_at`,
-        // Greenhouse lists only expose updated_at, so an edit would make an old post look new; keep the earliest date we
-        // have (the scorer replaces it with first_published on first sight). Other ATSs report a real posting date.
-        postedAt: sql`CASE WHEN excluded.source = 'Greenhouse' AND ${jobs.postedAt} IS NOT NULL THEN MIN(${jobs.postedAt}, excluded.posted_at) ELSE excluded.posted_at END`,
-        salary: sql`COALESCE(excluded.salary, ${jobs.salary})`,
-        jdSkills: sql`COALESCE(excluded.jd_skills, ${jobs.jdSkills})`, jdYears: sql`COALESCE(excluded.jd_years, ${jobs.jdYears})`, jdFlags: sql`COALESCE(excluded.jd_flags, ${jobs.jdFlags})`, jdFetchedAt: sql`COALESCE(excluded.jd_fetched_at, ${jobs.jdFetchedAt})`,
-        // A job we auto-closed earlier that is back on the board becomes New again; statuses you set stay.
-        status: sql`CASE WHEN ${jobs.status} = 'Closed' THEN 'New' ELSE ${jobs.status} END`,
-      },
-    }));
-  }
+  const statements: Statement[] = jobUpsertStatements(db, rows);
   // Jobs from this board that the board no longer lists (or that no longer match) are closed.
   statements.push(db.update(jobs).set({ status: "Closed" }).where(and(
     sql`${jobs.canonicalKey} >= ${prefix} AND ${jobs.canonicalKey} < ${prefix + "\uffff"}`,
