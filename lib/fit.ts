@@ -7,6 +7,7 @@ import { getState, setState } from "./state";
 import { classifyRole, type RoleFamily } from "./roles";
 import { fetchJobDescription } from "./ats-connectors";
 import { hasHardBlocker, summarizeJd } from "./jd";
+import { visibleJobs } from "./visibility";
 
 /**
  * Fit scoring: how well does a job match the candidate? A small model (Workers AI, Llama 3.1 8B) reads the candidate
@@ -103,7 +104,7 @@ export async function scorePendingJobs(limit = 80) {
   const db = getDb();
   if (!fitConfigured()) return { configured: false as const, scored: 0, failed: 0, remaining: 0 };
   const profile = await getProfile();
-  const pending = await db.select().from(jobs).where(and(isNull(jobs.fitScore), inArray(jobs.status, ["New", "Saved"]))).orderBy(desc(jobs.postedAt), desc(jobs.discoveredAt)).limit(Math.min(200, Math.max(1, limit)));
+  const pending = await db.select().from(jobs).where(and(isNull(jobs.fitScore), inArray(jobs.status, ["New", "Saved"]), visibleJobs)).orderBy(desc(jobs.postedAt), desc(jobs.discoveredAt)).limit(Math.min(200, Math.max(1, limit)));
   // Sponsorship on record, looked up once per distinct first token.
   const keys = [...new Set(pending.map(job => employerKey(normalizeEmployer(job.company))).filter(Boolean))];
   const byKey = new Map<string, SponsorRow[]>();
@@ -147,7 +148,7 @@ export async function scorePendingJobs(limit = 80) {
       await db.update(jobs).set({ fitScore: -1, fitReason: reason, fitScoredAt: now }).where(inArray(jobs.id, chunk.map(job => job.id)));
     }
   }
-  const remainingRows = await db.select({ count: sql<number>`count(*)` }).from(jobs).where(and(isNull(jobs.fitScore), inArray(jobs.status, ["New", "Saved"])));
+  const remainingRows = await db.select({ count: sql<number>`count(*)` }).from(jobs).where(and(isNull(jobs.fitScore), inArray(jobs.status, ["New", "Saved"]), visibleJobs));
   return { configured: true as const, scored, failed, remaining: Number(remainingRows[0]?.count ?? 0) };
 }
 

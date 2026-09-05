@@ -2,6 +2,7 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { h1bSponsors, jobs } from "../../../db/schema";
 import { employerKey, matchSponsor, normalizeEmployer, type SponsorRow } from "../../../lib/h1b";
+import { visibleJobs } from "../../../lib/visibility";
 
 const jobStatuses = ["New", "Saved", "Applied", "Interview", "Rejected", "Archived", "Closed"] as const;
 
@@ -10,7 +11,7 @@ export async function GET() {
     const db = getDb();
     // Earlier versions inserted fake placeholder jobs; make sure none linger in the feed.
     await db.delete(jobs).where(eq(jobs.isSeed, true));
-    const rows = await db.select().from(jobs).orderBy(desc(jobs.postedAt), desc(jobs.discoveredAt)).limit(2000);
+    const rows = await db.select().from(jobs).where(visibleJobs).orderBy(desc(jobs.postedAt), desc(jobs.discoveredAt)).limit(2000);
     // H-1B sponsorship: look up every distinct first token once, then match each company against its candidates.
     const keys = [...new Set(rows.map(row => employerKey(normalizeEmployer(row.company))).filter(Boolean))];
     const byKey = new Map<string, SponsorRow[]>();

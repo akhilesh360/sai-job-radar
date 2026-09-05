@@ -68,3 +68,7 @@ export function summarizeJd(rawHtmlOrText: string): JdSummary {
   return { skills: extractSkills(text), years: extractYears(text), flags: extractFlags(text) };
 }
 export const hasHardBlocker = (flags: readonly string[]) => flags.includes("no-sponsorship") || flags.includes("citizens-only") || flags.includes("clearance");
+
+/** Rows the dashboard should never show: descriptions or titles that require citizenship or a security clearance. */
+export const EXCLUDED_JD_FLAG_LIKES = ["%citizens-only%", "%clearance%"];
+export const EXCLUDED_TITLE_LIKES = ["%clearance%", "%citizen%", "%TS/SCI%", "%top secret%"];
