@@ -14,6 +14,7 @@ import seedSources10 from "../data/source-seeds-10.json"; // boards behind artif
 import seedSources11 from "../data/source-seeds-11.json"; // SmartRecruiters boards with US postings from the owner's old scraper lists (2026-09)
 import seedSources12 from "../data/source-seeds-12.json"; // boards behind the owner's saved application links (2026-09)
 import seedSources13 from "../data/source-seeds-13.json"; // Gem boards from the owner's saved application links (2026-09)
+import seedSources14 from "../data/source-seeds-14.json"; // openjobdata.com companies (US, readable ATS) that have posted a data/ML role (2026-09)
 
 const seedSources = [
   ...seedSources1,
@@ -29,6 +30,7 @@ const seedSources = [
   ...seedSources11,
   ...seedSources12,
   ...seedSources13,
+  ...seedSources14,
 ];
 
 const progressKey = "seed_catalog_offset";
