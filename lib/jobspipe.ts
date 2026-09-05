@@ -59,7 +59,19 @@ export async function syncJobsPipe(force = false) {
       jdText: raw.description ? String(raw.description).slice(0, 8000) : undefined,
     });
   }
-  const upsert = await upsertAggregatorJobs(out);
+  // JobsPipe returns each source's copy separately (Greenhouse + Indeed + LinkedIn of one Roblox posting), and "posted in
+  // the last 2 days" can mean re-posted. Keep one row per company + title, preferring the employer's own link, and drop
+  // anything whose own posting date is older than three days.
+  const cutoff = Date.now() - 3 * 86400000;
+  const byPosting = new Map<string, CanonicalJob>();
+  for (const job of out) {
+    if (job.postedAt && new Date(job.postedAt).getTime() < cutoff) continue;
+    const key = `${job.company}|${job.title}`.toLowerCase().replace(/[^a-z0-9|]+/g, " ").trim();
+    const current = byPosting.get(key);
+    const direct = (candidate: CanonicalJob) => !/linkedin\.com|indeed\.com/i.test(candidate.applyUrl);
+    if (!current || (direct(job) && !direct(current))) byPosting.set(key, job);
+  }
+  const upsert = await upsertAggregatorJobs([...byPosting.values()]);
   await setState(db, "jobspipe_last_sync_at", now);
-  return { configured: true as const, returned: (data.data ?? []).length, kept: out.length, ...upsert, creditsUsed: data.metadata?.credits_used ?? null };
+  return { configured: true as const, returned: (data.data ?? []).length, kept: byPosting.size, ...upsert, creditsUsed: data.metadata?.credits_used ?? null };
 }
