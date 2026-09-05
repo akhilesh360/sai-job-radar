@@ -9,14 +9,20 @@ export type FailureKind = "gone" | "blocked" | "transient" | "parse" | "excluded
 
 const HOUR = 60 * 60 * 1000;
 
-/** Retry delays (hours) per failure kind, indexed by how many attempts have already failed. Empty = dead at once. */
+/**
+ * Retry policy: every parked board is re-probed once a week, for up to eight weeks, then marked dead. Policy exclusions
+ * and unsupported ATSs are dead at once. (A flat weekly cadence keeps the cron load predictable: ~5,000 parked boards
+ * spread over a week is ~30 probes per hour.)
+ */
+const WEEK_HOURS = 168;
+const MAX_WEEKLY_RETRIES = 8;
 const RETRY_SCHEDULE: Record<FailureKind, number[]> = {
-  transient: [1, 6, 24, 72, 168],        // network / 5xx: retry quickly, give up after a week
-  blocked: [24, 72, 168, 336],           // 401/403/429: the host may lift the block; back off hard
-  parse: [24, 72, 168],                  // HTML where JSON was expected: usually a moved board
-  gone: [168, 720],                      // 404/410: boards do occasionally come back; check weekly, then monthly
-  excluded: [],                          // policy exclusion (federal, aggregators): never retry
-  unsupported: [],                       // ATS we have no connector for
+  transient: Array(MAX_WEEKLY_RETRIES).fill(WEEK_HOURS),
+  blocked: Array(MAX_WEEKLY_RETRIES).fill(WEEK_HOURS),
+  parse: Array(MAX_WEEKLY_RETRIES).fill(WEEK_HOURS),
+  gone: Array(MAX_WEEKLY_RETRIES).fill(WEEK_HOURS),
+  excluded: [],
+  unsupported: [],
 };
 
 export function classifyFailure(message: string | null | undefined): FailureKind {

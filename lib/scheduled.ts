@@ -11,8 +11,8 @@ import { scorePendingJobs } from "./fit";
  *   1. Google discovery — only when AUTO_DISCOVERY is on. It is off: Google runs from the dashboard's
  *      "Google search" button instead, so Serper credits are spent only when you ask.
  *   2. Validate pending boards (newly discovered ones first).
- *   2b. Re-probe up to 40 dead-letter boards whose backoff timer has expired (lib/dead-letter.ts); ones that answer
- *       rejoin the scan rotation, ones that keep failing are pushed out or marked dead.
+ *   2b. Re-probe up to 40 dead-letter boards whose weekly retry is due (lib/dead-letter.ts); ones that answer
+ *       rejoin the scan rotation, ones that keep failing wait another week (dead after eight weeks).
  *   3. Scan boards that are due: bumped/new boards first, then productive boards not read in the last
  *      14 minutes (400 per run — 1,200 boards per 15 minutes), then quiet boards older than a day.
  */
