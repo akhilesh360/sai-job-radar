@@ -375,6 +375,8 @@ export async function fetchBoardJobs(source: SourceBoard): Promise<CanonicalJob[
         if (!applyUrl || /myworkdayjobs\.com/i.test(applyUrl)) continue;
         const mapped = atsKeyFromUrl(applyUrl);
         const board: SourceBoard = mapped ? { id: mapped.id, ats: mapped.ats, slug: mapped.slug, companyName: str(raw.company) || mapped.slug } : { ...source, companyName: str(raw.company) || source.companyName };
+        // A listing on a Greenhouse/Ashby/Lever board we do not read yet is also a new company: queue the board.
+        if (mapped) discoveredBoards.set(board.id, { ...board, boardUrl: applyUrl.replace(/\/[^/]+\/?$/, ""), origin: "aijobs" });
         out.push(canonical(board, mapped ? mapped.jobId : applyUrl.replace(/^https?:\/\//, ""), title, location, applyUrl, raw.posted, str(raw.salary) || null));
       }
       if (stale) break;
