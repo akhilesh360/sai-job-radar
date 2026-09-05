@@ -9,7 +9,7 @@
 A single-user job-discovery dashboard for US data / AI / analytics engineering roles, tuned for one outcome:
 apply within the first hour a role is posted, at companies that sponsor H-1B visas. It reads employers'
 applicant-tracking systems (ATS) directly, scores every posting against the owner's profile with a small LLM,
-and pushes qualifying roles to Slack. The catalog covers ~19,700 live company boards across 19 connectors.
+and pushes qualifying roles to Slack. The catalog covers ~19,700 live company boards across 18 connectors.
 
 ## 2. Design principles
 
@@ -28,7 +28,7 @@ and pushes qualifying roles to Slack. The catalog covers ~19,700 live company bo
 ```mermaid
 flowchart TB
   subgraph Sources["External sources (all public, no credentials)"]
-    ATS["Company ATS JSON feeds<br/>Greenhouse · Ashby · Lever · SmartRecruiters · Workable<br/>Rippling · Recruitee · Breezy · Pinpoint · BambooHR<br/>JobScore · Oracle HCM · Gem · Workday · Phenom"]
+    ATS["Company ATS JSON feeds<br/>Greenhouse · Ashby · Lever · SmartRecruiters · Workable<br/>Rippling · Recruitee · Breezy · Pinpoint · BambooHR<br/>JobScore · Oracle HCM · Gem · Phenom"]
     AGG["Cross-company feeds<br/>Workable Search · Amazon Jobs<br/>Hacker News Who-is-hiring · AI Jobs"]
     OJD["openjobdata.com daily delta<br/>(Hugging Face parquet)"]
     SERP["Serper (Google Search API)"]
@@ -135,7 +135,7 @@ then delete. Recovered boards return to `active`. The dashboard chip shows queue
 ### 4.5 Scoring (`lib/fit.ts`)
 
 For each unscored job (80 per run): fetch the job description where the ATS has a per-job endpoint (Greenhouse
-with pay ranges and `first_published`, Workable, SmartRecruiters, BambooHR, Workday `startDate` + description);
+with pay ranges and `first_published`, Workable, SmartRecruiters, BambooHR);
 extract skills, years and flags (`lib/jd.ts`); jobs flagged clearance / citizenship are hidden (`lib/visibility.ts`).
 Five capped sub-scores are summed server-side from the LLM's structured answer against the profile stored in
 `system_state.candidate_profile`. Sponsorship is checked against `h1b_sponsors` (USCIS hub) and `h1b_lca_stats`
@@ -187,7 +187,6 @@ company + title + location rows keeping the newest; reloads every 5 minutes.
 | Rippling · Recruitee · Breezy · Pinpoint · BambooHR · JobScore | per-ATS public list endpoints | Rippling/Gem have no posting date |
 | Oracle HCM | `{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions` | slug `host--site` |
 | Gem | `POST jobs.gem.com/api/public/graphql` (JobBoardList) | |
-| **Workday** | `POST {tenant}.wd{N}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs`; per-job `…/job/{path}` | slug `tenant.wdN--site`; US facet detected per tenant; 4 searches × ≤5 pages; only hand-picked consulting tenants (seed 16), never auto-discovered |
 | **Phenom** | `POST {host}/widgets` (ddoKey `refineSearch`) | slug `host[--lang/path]`; BCG only for now |
 | Workable Search | `jobs.workable.com/api/v1/jobs?query&location=United States&day_range=2` | cross-company; resolves account slugs |
 | Amazon | `amazon.jobs/en/search.json?country=USA&sort=recent` | |
@@ -199,16 +198,16 @@ Evaluated and rejected (no public JSON or bot walls): Greenhouse candidate searc
 Gusto, Comeet, Dover, JazzHR, Jobvite, Paylocity, Dayforce, SuccessFactors sites (EY, Wipro, HCL, NTT Data),
 Cloudflare-walled career sites (Cognizant, EPAM, CDW), ntfy.sh as the primary alert channel.
 
-Exclusions (`lib/exclusions.ts`): federal contractors, EWOR, Jobgether, Momentum Engineering; Workday is not
-discovered from Google and openjobdata Workday rows are dropped. Staffing agencies and India-based IT services
-firms were deliberately left out of the consulting seed (owner's call, September 2026).
+Exclusions (`lib/exclusions.ts`): federal contractors, EWOR, Jobgether, Momentum Engineering. **Workday is out entirely**
+(owner's decision, reaffirmed September 2026 after a one-day trial of a direct connector): not discovered from Google,
+openjobdata Workday rows are dropped, no Workday connector. Staffing agencies and India-based IT services firms are
+also left out.
 
 ## 7. Catalog seeds (`data/source-seeds-N.json`, `lib/source-catalog.ts`)
 
 1–5 original catalog · 6 S&P 500 · 7 owner's application trackers · 8 SimplifyJobs · 9 Y Combinator · 10 AI Jobs ·
 11 SmartRecruiters lists · 12–13 owner's saved application links (incl. Gem) · 14 openjobdata US companies with
-data-role history · 15 remaining openjobdata US companies on readable ATSs · 16 consulting/advisory firms on Workday
-+ BCG on Phenom. Staged 8 rows per statement via `POST /api/sources` (never pass `offset` on prod: it rewrites the
+data-role history · 15 remaining openjobdata US companies on readable ATSs · 16 BCG on Phenom. Staged 8 rows per statement via `POST /api/sources` (never pass `offset` on prod: it rewrites the
 catalog pointer).
 
 ## 8. Scheduling, throughput and cost
@@ -230,7 +229,7 @@ catalog pointer).
 - **Finite loops**: server-issued `since` cursor; validation and scan stop at `remaining = 0`; the remaining
   count is informational (`-1` = unknown) and never fails a scan.
 - **Failure isolation**: per-board try/catch; dead-letter queue with deletion; one bad board never blocks others.
-- **Rate limits**: Serper 3 concurrent with backoff on 429/5xx; Workday/Phenom capped at ~20 requests per board.
+- **Rate limits**: Serper 3 concurrent with backoff on 429/5xx; Phenom capped at 20 requests per board.
 - **Idempotency**: all inserts are upserts on canonical ids; alert deliveries are recorded before dedupe.
 - **Secrets**: Workers Secrets only; `.env` is git-ignored.
 - **No self-fetch**: the cron calls library functions directly.
@@ -247,9 +246,8 @@ npx wrangler secret put SLACK_WEBHOOK_URL                                     # 
 
 ## 11. Known limitations / future work
 
-- Workday and Phenom rows on global sites carry "United States" as the location when the tenant hides the city
-  in the list payload; the per-job endpoint has the exact location and could backfill it.
 - Rippling and Gem publish no posting date; their freshness is when the radar first saw the job.
 - Role/location matching is regex-based; verified against the owner's 195-title list on every change.
-- Pending decisions: reading Workday broadly (openjobdata would add ~75 US roles/day); staffing agencies and
-  India-based IT services firms; Gmail-based application tracking; a daily "apply now" shortlist at a fixed time.
+- Not readable without Workday: most Fortune 500 employers and 62 of the heaviest data-role H-1B sponsors (PayPal,
+  Expedia, Eli Lilly, Salesforce, Intel, NVIDIA, …). Accepted trade-off.
+- Pending: Gmail-based application tracking; a daily "apply now" shortlist at a fixed time.
