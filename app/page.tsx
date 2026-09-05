@@ -229,6 +229,13 @@ export default function Home() {
     }
   };
 
+  /** One click for the whole pipeline: Google search for new companies first, then check and read every board. */
+  const runEverything = async () => {
+    await runGoogleSearch();
+    if (stopRequested.current) return;
+    await runFullScan();
+  };
+
   const sendDigest = async () => {
     setNotice("Preparing digest…");
     const response = await fetch("/api/internal/digest", { method: "POST" });
@@ -289,7 +296,10 @@ export default function Home() {
         <button className="secondary-btn" onClick={() => void sendDigest()}><Icon name="mail" /> Email digest</button>
         {scanning
           ? <button className="primary-btn" onClick={() => { stopRequested.current = true; setNotice("Stopping after the current batch…"); }}><Icon name="stop" /> Stop</button>
-          : <button className="primary-btn" onClick={() => void runFullScan()} disabled={googleRunning}><Icon name="refresh" /> Scan boards</button>}
+          : <>
+              <button className="secondary-btn" onClick={() => void runFullScan()} disabled={googleRunning}><Icon name="refresh" /> Scan boards</button>
+              <button className="primary-btn" onClick={() => void runEverything()} disabled={googleRunning}><Icon name="radar" /> Full scan</button>
+            </>}
       </div>
     </header>
 

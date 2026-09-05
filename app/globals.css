@@ -165,3 +165,8 @@ body{margin:0;background:#eef3f6;color:var(--ink);font-family:Inter,ui-sans-seri
 .role-badges button.h1b{margin-left:0;line-height:1.2;padding:3px 8px}
 .role-body .jd-tags{margin-top:1px}
 .role-body .h1b-detail{margin:2px 0}
+
+/* Apply: a proper button */
+.apply-link{display:inline-flex;align-items:center;gap:6px;background:var(--green);color:#fff !important;padding:7px 12px;border-radius:7px;font-weight:700;font-size:12px;text-decoration:none;border:1px solid var(--green);white-space:nowrap}
+.apply-link:hover{filter:brightness(1.08)}
+.apply-link .icon{stroke:#fff}
