@@ -12,6 +12,7 @@ import { visibleJobs } from "./visibility";
  */
 export const MIN_ALERT_SCORE = 75;
 const MAX_PER_RUN = 25; // one digest message per pass
+const POSTED_WITHIN_HOURS = 24; // only postings from the last day are worth a ping
 
 export async function sendFitAlerts(preview = 0) {
   const bindings = env as unknown as { SLACK_WEBHOOK_URL?: string; SLACK_MENTION?: string; NTFY_TOPIC?: string };
@@ -20,9 +21,10 @@ export async function sendFitAlerts(preview = 0) {
   if (!channel) return { configured: false as const, sent: 0, failed: 0 };
   const db = getDb();
   const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+  const postedSince = new Date(Date.now() - POSTED_WITHIN_HOURS * 60 * 60 * 1000).toISOString();
   const candidates = await db.select().from(jobs)
-    // Posted (or, when the ATS gives no date, first seen) within 48 hours: an old posting on a newly added board is not news.
-    .where(and(eq(jobs.status, "New"), gte(jobs.fitScore, MIN_ALERT_SCORE), gt(jobs.fitScoredAt, since), or(gt(jobs.postedAt, since), and(isNull(jobs.postedAt), gt(jobs.discoveredAt, since))), visibleJobs))
+    // Posted (or, when the ATS gives no date, first seen) within the last day: an old posting on a newly added board is not news.
+    .where(and(eq(jobs.status, "New"), gte(jobs.fitScore, MIN_ALERT_SCORE), gt(jobs.fitScoredAt, since), or(gt(jobs.postedAt, postedSince), and(isNull(jobs.postedAt), gt(jobs.discoveredAt, postedSince))), visibleJobs))
     .orderBy(desc(jobs.fitScoredAt), desc(jobs.fitScore)).limit(60); // newest matches first: a fresh 76 must not wait behind old 90s
   if (!candidates.length) return { configured: true as const, sent: 0, failed: 0 };
   // Only successful deliveries block a re-send; a failed attempt is retried on the next pass.
@@ -55,12 +57,13 @@ export async function sendFitAlerts(preview = 0) {
   const clean = (value: string) => value.replace(/[<>|`]/g, " ").replace(/\s+/g, " ").trim();
   const pad = (value: string, width: number) => (value.length > width ? value.slice(0, width - 1) + "…" : value).padEnd(width);
   // Slack's table block: one row per match, the title cell is the apply link.
+  const ago = (iso: string) => { const h = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 3600000)); return h < 1 ? "just now" : h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`; };
   const cell = (text: string) => ({ type: "raw_text", text: text || "-" });
   const tableRows = [
-    ["Score", "Title", "Company", "Location", "H-1B"].map(cell),
+    ["Score", "Title", "Company", "Location", "Posted", "H-1B"].map(cell),
     ...rows.map(({ job, sponsor }) => [cell(String(job.fitScore)),
       { type: "rich_text", elements: [{ type: "rich_text_section", elements: [{ type: "link", url: job.applyUrl, text: clean(job.title).slice(0, 80) }] }] },
-      cell(clean(job.company).slice(0, 40)), cell(clean(job.location).slice(0, 40)), cell(sponsor ? "yes" : "-")]),
+      cell(clean(job.company).slice(0, 40)), cell(clean(job.location).slice(0, 40)), cell(ago(job.postedAt ?? job.discoveredAt)), cell(sponsor ? "yes" : "-")]),
   ];
   const mention = bindings.SLACK_MENTION ?? "<!channel>";
   let ok = false;
