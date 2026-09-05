@@ -41,7 +41,7 @@ const familyPatterns: Array<{ family: RoleFamily; pattern: RegExp }> = [
 ];
 
 // Titles that are technically matched but not the kind of job worth applying to here.
-const excludedTitle = /\b(?:director|manager|head of|vp|vice president|chief|cto|cio|intern(?:ship)?|co-?op|apprentice|student|fellow|professor|recruiter|sales representative|sales development|account executive|account manager|evangelist|instructor|teacher|trainer|clerk|technician|electrician|mechanical|electrical|civil|structural|hvac|data center|data centre|datacenter|data entry|warehouse (?:associate|worker|operations|specialist|lead|supervisor|clerk|coordinator)|forklift|nurse|nursing|rn|lpn|clinical|oncology|registrar|coder|coding specialist|abstractor|drug|manufacturing engineer|process engineer|(?<!data )quality engineer|virtual desktop|vdi|field service|maintenance|janitor|driver|cashier|receptionist|paralegal)\b/i;
+const excludedTitle = /\b(?:director|manager|head of|vp|vice president|chief|cto|cio|intern(?:ship)?|co-?op|apprentice|student|fellow|professor|recruiter|sales representative|sales development|account executive|account manager|evangelist|instructor|teacher|trainer|clerk|technician|electrician|mechanical|electrical|civil|structural|hvac|data center|data centre|datacenter|data entry|warehouse (?:associate|worker|operations|specialist|lead|supervisor|clerk|coordinator)|forklift|nurse|nursing|rn|lpn|clinical|oncology|registrar|coder|coding specialist|abstractor|drug|(?<!data )quality engineer|virtual desktop|vdi|field service|maintenance|janitor|driver|cashier|receptionist|paralegal)\b/i;
 
 export function classifyRole(title: string): RoleFamily | null {
   const clean = title.replace(/\s+/g, " ").trim();
